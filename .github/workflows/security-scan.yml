@@ -10,6 +10,9 @@ permissions:
   security-events: write  # 上傳 SARIF 到 GitHub Security tab
   actions: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   checkov:
     name: Checkov IaC & Secrets Scan
@@ -21,6 +24,7 @@ jobs:
 
       - name: Checkov 資安掃描
         id: checkov
+        continue-on-error: true  # 防止 Cortex Cloud 連線例外中斷整個 job，SARIF 仍需上傳
         uses: bridgecrewio/checkov-action@v12
         with:
           # 掃描整個 repo
@@ -41,6 +45,13 @@ jobs:
           api-key: ${{ secrets.CORTEX_API_KEY_ID }}::${{ secrets.CORTEX_API_KEY }}
         env:
           LOG_LEVEL: WARNING
+
+      - name: 確認 SARIF 檔案存在
+        if: success() || failure()
+        run: |
+          if [ ! -f results.sarif ]; then
+            echo '{"version":"2.1.0","$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json","runs":[]}' > results.sarif
+          fi
 
       - name: 上傳 SARIF 至 GitHub Security
         uses: github/codeql-action/upload-sarif@v4
