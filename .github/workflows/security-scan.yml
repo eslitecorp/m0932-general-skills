@@ -67,9 +67,6 @@ jobs:
   cortex-upload:
     name: Cortex Cloud 上傳
     runs-on: ubuntu-latest
-    # 只在 push/workflow_dispatch 時上傳，PR 不重複上傳
-    if: github.event_name != 'pull_request'
-
     steps:
       - name: Checkout 程式碼
         uses: actions/checkout@v4
