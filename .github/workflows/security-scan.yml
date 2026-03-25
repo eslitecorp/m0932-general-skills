@@ -4,6 +4,10 @@ on:
   pull_request:
     branches:
       - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -12,6 +16,9 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CORTEX_API_KEY: ${{ secrets.CORTEX_API_KEY }}
+  CORTEX_API_KEY_ID: ${{ secrets.CORTEX_API_KEY_ID }}
+  CORTEX_API_URL: https://api-twes.xdr.tw.paloaltonetworks.com
 
 jobs:
   checkov:
@@ -24,7 +31,6 @@ jobs:
 
       - name: Checkov 資安掃描
         id: checkov
-        continue-on-error: true  # 防止 Cortex Cloud 連線例外中斷整個 job，SARIF 仍需上傳
         uses: bridgecrewio/checkov-action@v12
         with:
           # 掃描整個 repo
@@ -41,8 +47,6 @@ jobs:
           # soft_fail: true → 掃出問題時不阻擋 PR，僅作警示（初期建議）
           # 待團隊熟悉後可改為 false 強制阻擋
           soft_fail: true
-          # Cortex Cloud 整合：KEY_ID::SECRET_KEY 格式
-          api-key: ${{ secrets.CORTEX_API_KEY_ID }}::${{ secrets.CORTEX_API_KEY }}
         env:
           LOG_LEVEL: WARNING
 
@@ -55,8 +59,46 @@ jobs:
 
       - name: 上傳 SARIF 至 GitHub Security
         uses: github/codeql-action/upload-sarif@v4
-        # 無論掃描成功或失敗都要上傳，確保結果可見
         if: success() || failure()
         with:
           sarif_file: results.sarif
           category: checkov
+
+  cortex-upload:
+    name: Cortex Cloud 上傳
+    runs-on: ubuntu-latest
+    # 只在 push/workflow_dispatch 時上傳，PR 不重複上傳
+    if: github.event_name != 'pull_request'
+
+    steps:
+      - name: Checkout 程式碼
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 下載 Cortex CLI
+        run: |
+          set -x
+          crtx_resp=$(curl "${CORTEX_API_URL}/public_api/v1/unified-cli/releases/download-link?os=linux&architecture=amd64" \
+            -H "x-xdr-auth-id: ${CORTEX_API_KEY_ID}" \
+            -H "Authorization: ${CORTEX_API_KEY}")
+          crtx_url=$(echo $crtx_resp | jq -r ".signed_url")
+          curl -o cortexcli $crtx_url
+          chmod +x cortexcli
+          ./cortexcli --version
+
+      - name: Cortex CLI Code Scan 上傳
+        run: |
+          ./cortexcli \
+            --api-base-url "${CORTEX_API_URL}" \
+            --api-key "${CORTEX_API_KEY}" \
+            --api-key-id "${CORTEX_API_KEY_ID}" \
+            code scan \
+            --directory "${{ github.workspace }}" \
+            --repo-id "${{ github.repository }}" \
+            --branch "${{ github.ref_name }}" \
+            --source "GITHUB_ACTIONS" \
+            --create-repo-if-missing
