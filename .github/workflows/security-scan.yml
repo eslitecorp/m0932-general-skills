@@ -37,13 +37,13 @@ jobs:
           # soft_fail: true → 掃出問題時不阻擋 PR，僅作警示（初期建議）
           # 待團隊熟悉後可改為 false 強制阻擋
           soft_fail: true
-          # Cortex Cloud 整合：KEY_ID::SECRET_KEY 格式
-          api-key: ${{ secrets.CORTEX_API_KEY_ID }}::${{ secrets.CORTEX_API_KEY }}
+          # Cortex Cloud 整合（選填）：需在 repo secrets 設定 CORTEX_API_KEY_ID 與 CORTEX_API_KEY
+          # api-key: ${{ secrets.CORTEX_API_KEY_ID }}::${{ secrets.CORTEX_API_KEY }}
         env:
           LOG_LEVEL: WARNING
 
       - name: 上傳 SARIF 至 GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         # 無論掃描成功或失敗都要上傳，確保結果可見
         if: success() || failure()
         with:
