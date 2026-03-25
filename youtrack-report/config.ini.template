@@ -1,0 +1,6 @@
+[youtrack]
+; YouTrack 實例網址，例如：https://your-org.youtrack.cloud
+url = "https://your-youtrack-instance.youtrack.cloud"
+; YouTrack 個人 API Token
+; 取得方式：YouTrack → Profile → Authentication → New Permanent Token
+token = "YOUR_YOUTRACK_API_TOKEN"
