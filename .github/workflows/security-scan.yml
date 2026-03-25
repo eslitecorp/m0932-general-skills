@@ -1,0 +1,51 @@
+name: Security Scan (Checkov / Cortex Cloud)
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  security-events: write  # 上傳 SARIF 到 GitHub Security tab
+  actions: read
+
+jobs:
+  checkov:
+    name: Checkov IaC & Secrets Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout 程式碼
+        uses: actions/checkout@v4
+
+      - name: Checkov 資安掃描
+        id: checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          # 掃描整個 repo
+          directory: .
+          # 掃描項目：GitHub Actions 設定 + 機密偵測 + 一般設定檔
+          framework: github_actions,secrets
+          # 同時輸出 CLI（顯示在 log）與 SARIF（上傳 Security tab）
+          output_format: cli,sarif
+          output_file_path: console,results.sarif
+          # 不把 venv 等非必要目錄納入掃描
+          skip_path: >-
+            youtrack-report/venv,
+            .git
+          # soft_fail: true → 掃出問題時不阻擋 PR，僅作警示（初期建議）
+          # 待團隊熟悉後可改為 false 強制阻擋
+          soft_fail: true
+          # Cortex Cloud 整合：KEY_ID::SECRET_KEY 格式
+          api-key: ${{ secrets.CORTEX_API_KEY_ID }}::${{ secrets.CORTEX_API_KEY }}
+        env:
+          LOG_LEVEL: WARNING
+
+      - name: 上傳 SARIF 至 GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        # 無論掃描成功或失敗都要上傳，確保結果可見
+        if: success() || failure()
+        with:
+          sarif_file: results.sarif
+          category: checkov
