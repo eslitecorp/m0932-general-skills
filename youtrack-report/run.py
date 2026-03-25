@@ -117,7 +117,7 @@ def main():
         print("請確認 config.ini 檔案存在且包含 [youtrack] 區塊與 url/token。")
         return
 
-    if "your-youtrack-instance.com" in base_url or "YOUR_API_TOKEN" in token:
+    if base_url == "https://your-youtrack-instance.youtrack.cloud" or token == "YOUR_YOUTRACK_API_TOKEN":
         print(f"錯誤：請先在 {CONFIG_PATH} 中設定您的 YouTrack 網址和 API Token。")
         return
 
