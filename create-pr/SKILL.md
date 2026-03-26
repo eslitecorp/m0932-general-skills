@@ -1,7 +1,6 @@
 ---
 name: create-pr
-description: "分析 git diff 將變更分類成獨立的 atomic commits（繁體中文訊息），並建立 PR 到 main 分支。觸發語句：「幫我建立 PR」、「commit 並開 PR」、「create pr」、「/create-pr」。"
-tags: ["git", "pr", "commit", "atomic", "github"]
+description: "分析 git diff 將變更分類成獨立的 atomic commits（gitmoji 格式，繁體中文訊息），並建立 PR 到 main 分支。觸發語句：「幫我建立 PR」、「commit 並開 PR」、「create pr」、「/create-pr」。"
 ---
 
 # Create PR — Atomic Commit & Pull Request
@@ -28,19 +27,22 @@ git diff --cached
 
 ### Step 2：分析並分類變更
 
-依照以下分類邏輯，將所有變更檔案歸入對應類型。**每個分類將形成一個獨立的 atomic commit。**
+依照以下 gitmoji 分類，將所有變更檔案歸入對應類型。**每個分類將形成一個獨立的 atomic commit。**
 
-| 類型 | 判斷條件 | Commit 前綴 |
-|---|---|---|
-| **新功能** | 新增功能邏輯、新增 API endpoint、新增模組 | `feat` |
-| **修正錯誤** | 修正 bug、行為不符預期 | `fix` |
-| **重構** | 不改變行為的程式碼整理、改名、搬移 | `refactor` |
-| **文件** | README、SKILL.md、註解、文件更新 | `docs` |
-| **設定** | 設定檔、環境變數、CI/CD、依賴套件 | `chore` |
-| **測試** | 新增或修改測試 | `test` |
-| **樣式** | 格式化、縮排、不影響邏輯的排版 | `style` |
+| Emoji | 用途 |
+|---|---|
+| ✨ | 新增功能 |
+| 🐛 | 修正 bug |
+| ♻️ | 重構（不改變行為） |
+| 📝 | 文件、README、註解 |
+| 🔧 | 設定檔、環境變數、CI/CD |
+| 📦️ | 新增或更新相依套件 |
+| ✅ | 新增或更新測試 |
+| 💄 | UI / 樣式調整 |
+| 🔥 | 刪除程式碼或檔案 |
+| 👷 | CI build system |
 
-> 若一個檔案跨越多個類型，以**主要意圖**為準；如難以判斷，以 `refactor` 為預設。
+> 若一個檔案跨越多個類型，以**主要意圖**為準；難以判斷時預設用 ♻️。
 
 ---
 
@@ -51,15 +53,15 @@ git diff --cached
 ```
 以下是預計的 commit 分組，請確認是否正確：
 
-[1] feat：新增使用者登入功能
+[1] ✨ 新增使用者登入功能
     - src/auth/login.ts
     - src/auth/types.ts
 
-[2] chore：更新套件依賴
+[2] 📦️ 更新套件依賴
     - package.json
     - package-lock.json
 
-[3] docs：更新 README 操作說明
+[3] 📝 更新 README 操作說明
     - README.md
 
 是否繼續？(y/n)
@@ -74,35 +76,20 @@ git diff --cached
 **Commit 訊息格式（繁體中文）：**
 
 ```
-<類型>(<範圍>): <簡短說明>
-
-<詳細說明（選填）>
+<emoji> (<範圍>): <簡短說明>
 ```
 
 **規則：**
 - 第一行不超過 72 字元
-- 類型使用英文小寫前綴（`feat`, `fix`, `refactor`, `docs`, `chore`, `test`, `style`）
+- 以 gitmoji emoji 開頭（直接用 emoji 字元，非 `:code:`）
 - 範圍（scope）為受影響的模組或資料夾名稱，可省略
-- 簡短說明使用**繁體中文**，動詞開頭，描述「做了什麼」
-- 詳細說明（選填）解釋「為什麼這樣做」
+- 說明使用**繁體中文**，簡潔描述「做了什麼」
 
 **範例：**
 ```
-feat(auth): 新增使用者登入驗證功能
-
-實作 JWT token 驗證邏輯，支援 email/password 登入，
-並於登入失敗時回傳標準化錯誤訊息。
-```
-
-```
-fix(cart): 修正購物車數量計算錯誤
-
-當商品數量為 0 時，原先邏輯未正確清除購物車項目，
-導致結帳時出現 NaN 金額。
-```
-
-```
-chore: 更新 Python 依賴套件至最新版本
+✨ (auth): 新增使用者登入驗證功能
+🐛 (cart): 修正購物車數量計算錯誤
+🔧: 更新 Python 依賴套件至最新版本
 ```
 
 **執行方式（每個分組依序）：**
@@ -140,10 +127,12 @@ git checkout -b <功能描述的分支名稱>
 
 **建立 PR：**
 
+PR title 格式：`<emoji> (<scope>): <說明>`，例如 `✨ (auth): 新增登入驗證功能`
+
 ```bash
 gh pr create \
   --base main \
-  --title "<本次變更的簡短說明（繁體中文）>" \
+  --title "<emoji> (<scope>): <繁體中文說明>" \
   --body "$(cat <<'EOF'
 ## 變更摘要
 
@@ -177,8 +166,8 @@ PR 建立完成！
 PR 連結：<PR URL>
 
 本次包含 <N> 個 atomic commits：
-  [1] feat(auth): 新增使用者登入驗證功能
-  [2] chore: 更新套件依賴
+  [1] ✨ (auth): 新增使用者登入驗證功能
+  [2] 📦️: 更新套件依賴
 
 Code Owner 審查已自動指派，PR 合併至 main 前需獲得審查核准。
 ```
