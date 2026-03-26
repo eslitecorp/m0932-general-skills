@@ -1,7 +1,6 @@
 ---
 name: youtrack-report
 description: "連線 YouTrack 自動產生包含上週完成與未完成事項的 Markdown 週報。觸發語句：「幫我產週報」、「產生 YouTrack 週報」、「youtrack report」、「/youtrack-report」。"
-tags: ["youtrack", "report", "weekly", "api"]
 ---
 
 # YouTrack 週報產生器
@@ -15,27 +14,32 @@ tags: ["youtrack", "report", "weekly", "api"]
 
 ### Step 1：確認設定檔
 
-檢查 `youtrack-report/config.ini` 是否存在且已填入正確值：
+檢查 `youtrack-report/.env` 是否存在且已填入正確值：
 
 ```bash
-cat youtrack-report/config.ini
+cat youtrack-report/.env
 ```
 
-若檔案不存在或仍為預設值，提示使用者：
+若檔案不存在，提示使用者複製範本並填入：
 
+```bash
+cp youtrack-report/.env.template youtrack-report/.env
 ```
-請先複製 config.ini.template 為 config.ini，並填入：
-- url：YouTrack 實例網址（例如 https://your-org.youtrack.cloud）
-- token：個人 API Token（YouTrack → Profile → Authentication → New Permanent Token）
-```
+
+需填入：
+- `YOUTRACK_URL`：YouTrack 實例網址（例如 `https://your-org.youtrack.cloud`）
+- `YOUTRACK_TOKEN`：個人 API Token（YouTrack → Profile → Authentication → New Permanent Token）
 
 ---
 
 ### Step 2：執行週報腳本
 
 ```bash
-cd youtrack-report && python run.py
+bash youtrack-report/run.sh
 ```
+
+> `run.sh` 會自動建立 venv、安裝相依套件，並以 venv 絕對路徑執行，
+> 繞過 GVM 等 shell hook 對 `python` 指令的攔截。
 
 腳本會查詢以下兩組議題：
 - **上週完成**：`for: me State: Done resolved date: {last week}`
@@ -67,6 +71,6 @@ High 4h [PROJ-124 新增使用者管理功能](https://your-org.youtrack.cloud/i
 
 ## 注意事項
 
-- `config.ini` 含敏感資訊，已加入 `.gitignore`，請勿提交至版控
+- `.env` 含敏感資訊，已加入 `.gitignore`，請勿提交至版控
 - API Token 請使用 YouTrack Permanent Token，不要使用帳號密碼
 - 若 API 回傳 401，表示 token 已過期或權限不足
