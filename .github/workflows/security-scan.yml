@@ -67,6 +67,7 @@ jobs:
   cortex-upload:
     name: Cortex Cloud 上傳
     runs-on: ubuntu-latest
+    continue-on-error: true  # Palo Alto 後端 500 暫時容錯，待服務恢復後移除
     steps:
       - name: Checkout 程式碼
         uses: actions/checkout@v4
