@@ -97,7 +97,7 @@ python3 setup_monitoring.py \
 
 查詢方式（Datadog MCP 或 UI）：
 
-```
+```text
 搜尋 spans: service:athena-api 過去 15 分鐘
 觀察 resource_name tag 的實際值
 ```
@@ -106,8 +106,8 @@ python3 setup_monitoring.py \
 
 | 實際路由 | resource_name tag | resource-filter 參數 |
 |---------|-------------------|----------------------|
-| `GET /api/v4/products/:id` | `get /api/v4/products/123/purchase_info` | `get_/api/v4/products*` |
-| `GET /api/v2/cart/items` | `get /api/v2/cart/items?step=1&...` | `get_/api/v2/cart/items*` |
+| `GET /api/v4/products/:id` | `get /api/v4/products/123/...` | `get_/api/v4/products*` |
+| `GET /api/v2/cart/items` | `get /api/v2/cart/items?step=1` | `get_/api/v2/cart/items*` |
 | `POST /api/v1/orders` | `post /api/v1/orders` | `post_/api/v1/orders*` |
 
 > **注意：** Datadog tag 中空格以 `_` 表示，所以 `get /api/...` → filter 寫 `get_/api/...`
@@ -158,6 +158,7 @@ python3 setup_monitoring.py \
 ```
 
 一般原則：
+
 - 閾值 = max(avg × 2, p95_of_p99) 無條件進位
 - Cart/checkout 類：允許較高延遲（通常 10~15s）
 - 查詢類：要求較嚴格（通常 1~5s）
@@ -176,13 +177,98 @@ python3 setup_monitoring.py \
 
 腳本使用的底層 metric：
 
-```
+```text
 trace.OpenTelemetry_Instrumentation_Rack.server
 ```
 
 由 `opentelemetry-instrumentation-rack` gem 產生，為 distribution 類型，unit: seconds。
 
 可用 aggregator：`avg`, `p50`, `p75`, `p90`, `p95`, `p99`
+
+---
+
+## Datadog MCP 設定（AI 工具整合）
+
+透過 MCP 讓 AI 工具直接查詢 Datadog 數據（dashboards、metrics、spans、monitors 等）。
+
+### Claude Code
+
+**Step 1：建立 `.mcp.json`** 於專案根目錄（e.g., `~/Work/.mcp.json`）：
+
+```json
+{
+  "mcpServers": {
+    "datadog": {
+      "type": "http",
+      "url": "https://mcp.us5.datadoghq.com/api/unstable/mcp-server/mcp?toolsets=core,apm"
+    }
+  }
+}
+```
+
+**Step 2：重啟 Claude Code**（關閉後重新開啟）。
+
+**Step 3：在 Claude Code 中執行 `/mcp`**，找到 `datadog` server，點擊「Approve」允許連線。
+
+**Step 4：OAuth 登入**。核准後會自動觸發 Datadog OAuth，瀏覽器開啟登入視窗，以 Datadog 帳號授權後即完成連線。
+
+> 注意：`toolsets` 參數決定可用工具範圍。`core,apm` 為唯讀，
+> 可選值：`core`、`apm`、`alerting`、`cases`、`dbm`。
+
+### Roo Code
+
+**Step 1：建立 `.roo/mcp.json`** 於專案根目錄：
+
+```json
+{
+  "mcpServers": {
+    "datadog": {
+      "type": "streamable-http",
+      "url": "https://mcp.us5.datadoghq.com/api/unstable/mcp-server/mcp?toolsets=core,apm"
+    }
+  }
+}
+```
+
+**Step 2：重啟 VS Code** 或在 Roo Code 側邊欄點擊右上角 Server icon → Refresh。
+
+**Step 3：OAuth 登入**。Roo Code 偵測到設定後自動觸發瀏覽器 OAuth 視窗，以 Datadog 帳號授權後即完成連線。
+
+> 也可透過 UI 設定全域：Roo Code 側邊欄 → Server icon → **Edit Global MCP**，
+> 貼入相同 JSON 內容（適用於所有專案）。
+
+### GitHub Copilot（Agent Mode）
+
+**Step 1：建立 `.vscode/mcp.json`** 於專案根目錄：
+
+```json
+{
+  "servers": {
+    "datadog": {
+      "type": "http",
+      "url": "https://mcp.us5.datadoghq.com/api/unstable/mcp-server/mcp?toolsets=core,apm"
+    }
+  }
+}
+```
+
+**Step 2：重啟 VS Code**，Copilot 會自動偵測並載入 MCP server。
+
+**Step 3：開啟 Copilot Chat**，切換到 **Agent mode**（對話框左下角下拉選單）。
+
+**Step 4：OAuth 登入**。首次使用 datadog 工具時自動觸發瀏覽器 OAuth 視窗，授權後即完成連線。
+
+> 也可透過 Command Palette（`Cmd+Shift+P`）執行 **MCP: Open User Configuration**
+> 設定全域版本（適用於所有專案）。
+
+### MCP Endpoint 說明
+
+| 欄位 | 值 |
+|------|-----|
+| Site | US5 (`us5.datadoghq.com`) |
+| Endpoint | `https://mcp.us5.datadoghq.com/api/unstable/mcp-server/mcp` |
+| Toolsets | `core,apm`（可加 `alerting`, `cases`, `dbm`）|
+| 認證方式 | OAuth 2.1（瀏覽器登入，自動取得 token）|
 
 ---
 

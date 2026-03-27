@@ -1,4 +1,7 @@
 {
+  "MD013": {
+    "tables": false
+  },
   "MD060": {
     "style": "consistent"
   }
