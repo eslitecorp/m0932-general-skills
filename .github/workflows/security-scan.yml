@@ -1,0 +1,102 @@
+name: Security Scan (Checkov / Cortex Cloud)
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write  # 上傳 SARIF 到 GitHub Security tab
+  actions: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CORTEX_API_KEY: ${{ secrets.CORTEX_API_KEY }}
+  CORTEX_API_KEY_ID: ${{ secrets.CORTEX_API_KEY_ID }}
+  CORTEX_API_URL: https://api-twes.xdr.tw.paloaltonetworks.com
+
+jobs:
+  checkov:
+    name: Checkov IaC & Secrets Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout 程式碼
+        uses: actions/checkout@v4
+
+      - name: Checkov 資安掃描
+        id: checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          # 掃描整個 repo
+          directory: .
+          # 掃描項目：GitHub Actions 設定 + 機密偵測 + 一般設定檔
+          framework: github_actions,secrets
+          # 同時輸出 CLI（顯示在 log）與 SARIF（上傳 Security tab）
+          output_format: cli,sarif
+          output_file_path: console,results.sarif
+          # 不把 venv 等非必要目錄納入掃描
+          skip_path: >-
+            youtrack-report/venv,
+            .git
+          # soft_fail: true → 掃出問題時不阻擋 PR，僅作警示（初期建議）
+          # 待團隊熟悉後可改為 false 強制阻擋
+          soft_fail: true
+        env:
+          LOG_LEVEL: WARNING
+
+      - name: 確認 SARIF 檔案存在
+        if: success() || failure()
+        run: |
+          if [ ! -f results.sarif ]; then
+            echo '{"version":"2.1.0","$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json","runs":[]}' > results.sarif
+          fi
+
+      - name: 上傳 SARIF 至 GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
+        if: success() || failure()
+        with:
+          sarif_file: results.sarif
+          category: checkov
+
+  cortex-upload:
+    name: Cortex Cloud 上傳
+    runs-on: ubuntu-latest
+    continue-on-error: true  # Palo Alto 後端 500 暫時容錯，待服務恢復後移除
+    steps:
+      - name: Checkout 程式碼
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 下載 Cortex CLI
+        run: |
+          set -x
+          crtx_resp=$(curl "${CORTEX_API_URL}/public_api/v1/unified-cli/releases/download-link?os=linux&architecture=amd64" \
+            -H "x-xdr-auth-id: ${CORTEX_API_KEY_ID}" \
+            -H "Authorization: ${CORTEX_API_KEY}")
+          crtx_url=$(echo $crtx_resp | jq -r ".signed_url")
+          curl -o cortexcli $crtx_url
+          chmod +x cortexcli
+          ./cortexcli --version
+
+      - name: Cortex CLI Code Scan 上傳
+        run: |
+          ./cortexcli \
+            --api-base-url "${CORTEX_API_URL}" \
+            --api-key "${CORTEX_API_KEY}" \
+            --api-key-id "${CORTEX_API_KEY_ID}" \
+            code scan \
+            --directory "${{ github.workspace }}" \
+            --repo-id "${{ github.repository }}" \
+            --branch "${{ github.ref_name }}" \
+            --source "GITHUB_ACTIONS" \
+            --create-repo-if-missing

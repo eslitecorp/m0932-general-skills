@@ -1,0 +1,23 @@
+# 設定檔（含敏感資訊，不得進版控）
+config.ini
+*.env
+.env*
+secrets.*
+credentials.*
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
