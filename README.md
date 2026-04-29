@@ -10,16 +10,22 @@
 
 | Skill | 說明 |
 | --- | --- |
-| [create-pr](create-pr/) | 分析 git diff 將變更分類成 atomic commits（繁體中文訊息），並建立 PR 到 main 分支 |
+| [create-pr](create-pr/) | 分析 git diff 將變更分類成 atomic commits（繁體中文訊息），並建立 PR 到預設主線分支 |
 
 ### Meta / Skill 管理
 
 | Skill | 說明 |
 | --- | --- |
-| [create-skill](create-skill/) | 建立或迭代更新 Claude Code skill，含去重掃描、分類審視與 README 索引同步 |
+| [audit-skill](audit-skill/) | 稽核 repo 中所有 skill 的安全性、格式合規與可追溯性，產出風險報告並同步 README 索引 |
 
 ### 報告 / 資料整合
 
 | Skill | 說明 |
 | --- | --- |
 | [youtrack-report](youtrack-report/) | 連線 YouTrack 自動產生包含上週完成與未完成事項的 Markdown 週報 |
+
+### 監控 / Observability
+
+| Skill | 說明 |
+| --- | --- |
+| [datadog-setup-monitoring](datadog-setup-monitoring/) | 設定 Datadog 監控，建立 Dashboard、SLA/SLO 指標與告警規則 |
