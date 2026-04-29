@@ -44,7 +44,8 @@ def _load_dotenv():
                 continue
             key, _, value = line.partition("=")
             key = key.strip()
-            value = value.strip().strip('"').strip("'")
+            # 移除行內註解並處理引號
+            value = value.partition("#")[0].strip().strip('"').strip("'")
             if key and key not in os.environ:
                 os.environ[key] = value
 
