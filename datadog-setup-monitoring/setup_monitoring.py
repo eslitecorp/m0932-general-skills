@@ -29,6 +29,28 @@ import urllib.request
 import urllib.error
 import urllib.parse
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+
+def _load_dotenv():
+    """自動載入腳本同目錄的 .env 檔案（不覆蓋已存在的環境變數）"""
+    env_path = Path(__file__).parent / ".env"
+    if not env_path.exists():
+        return
+    with open(env_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            # 移除行內註解並處理引號
+            value = value.partition("#")[0].strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+_load_dotenv()
 
 # ── 設定 ────────────────────────────────────────────
 DD_SITE    = os.getenv("DD_SITE", "us5.datadoghq.com")
