@@ -17,7 +17,7 @@ tags: ["skill", "audit", "meta", "security"]
 列出 repo 中所有 skill：
 
 ```bash
-find . -name "SKILL.md" -not -path "./.git/*" | sort
+find . -maxdepth 2 -name "SKILL.md" -not -path "./.git/*" | sort
 ```
 
 逐一讀取每個 `SKILL.md` 的完整內容，準備進行稽核。

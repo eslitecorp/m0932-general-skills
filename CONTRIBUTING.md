@@ -26,7 +26,7 @@ flowchart TD
 
 ## Step 1：開 GitHub Issue
 
-1. 前往 repo 的 [Issues](../../issues) 頁面，點擊 **New Issue**
+1. 前往 repo 的 [Issues](issues) 頁面，點擊 **New Issue**
 2. 選擇 **Skill Proposal** template
 3. 填寫以下欄位（缺少任一項，維護者可能要求補充才能繼續討論）：
 
