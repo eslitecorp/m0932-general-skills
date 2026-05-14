@@ -1,6 +1,6 @@
 ---
 name: datadog-setup-monitoring
-description: "為指定 API 端點建立 Datadog 完整監控：2 個 Monitor（錯誤率 + P99 延遲）+ 3 個 SLO（可用性 + P99 延遲 + Request Rate）+ Dashboard section（含 Sum(Requests) 警示線）。觸發語句範例：「幫我把 GET /api/v3/orders 建立基本監控和 SLO」、「/datadog-setup-monitoring」。"
+description: "為指定 API 端點建立 Datadog 完整監控：3 個 Anomaly Monitor（Error Rate + P99 Latency + Request Rate）+ 2 個 Anomaly SLO（Availability + P99 Latency，Monitor-based）+ Dashboard section（含 anomaly overlay + event overlay）。觸發語句範例：「幫我把 GET /api/v3/orders 建立基本監控和 SLO」、「/datadog-setup-monitoring」。"
 argument-hint: "[service] [\"METHOD /path\"] [resource-filter] [p99-threshold or auto]"
 allowed-tools: Bash
 disable-model-invocation: false
@@ -68,8 +68,7 @@ for s in result.get("series", []):
   服務：{service}
   端點：{endpoint}
   resource-filter：{resource-filter}
-  P99 閾值：{p99-threshold}s（或自動計算）
-  錯誤率閾值：{error-threshold}%
+  錯誤率閾值：{error-threshold}%（Anomaly Monitor 無固定 P99 閾值，動態偵測）
   Dashboard：{dashboard-id 或「不加入」}
 ```
 
@@ -114,7 +113,10 @@ DD_API_KEY="..." DD_APP_KEY="..." python3 "${CLAUDE_SKILL_DIR}/setup_monitoring.
 
 執行完成後，整理輸出，以繁體中文顯示：
 - 建立的 Monitor 名稱與 ID
-- 建立的 SLO 名稱與 ID（Availability、P99 Latency、Request Rate）
+- 建立的 SLO 名稱與 ID
+  - Availability SLO：`{端點簡稱} Availability SLO (Anomaly, 99% / 30d)`
+  - P99 Latency SLO：`{端點簡稱} P99 Latency SLO (Anomaly, 99% / 30d)`
+  - Request Rate SLO：`{端點簡稱} Request Rate SLO (99% / 30d)`
 - Dashboard 連結（若有更新）
 - 若有錯誤，說明原因與解決方式
 
@@ -200,7 +202,7 @@ f"p99:{APM_METRIC}{{service:{service},$env,resource_name:{resource_filter}}}"
 
 ```
 行 y+0: [標題 note ── 全寬 w=12]
-行 y+1: [Avail SLO w=3][P99 SLO w=3][P99 Latency (s) 圖 w=6]
+行 y+1: [Avail SLO (Anomaly) w=3][P99 SLO (Anomaly) w=3][P99 Latency (s) 圖 w=6]
 行 y+4: [Error Rate w=6]            [Sum(Requests) w=6]
 ```
 
@@ -208,9 +210,9 @@ f"p99:{APM_METRIC}{{service:{service},$env,resource_name:{resource_filter}}}"
 
 | Widget | 內容 | 說明 |
 |--------|------|------|
-| P99 Latency | request 1: `p99:` line（dog_classic）<br>request 2: `anomalies(..., 'robust', 2)` line（gray） | robust 演算法適合穩定週期性指標 |
-| Error Rate | request 1: `errors/total*100` bars（warm）<br>request 2: `anomalies(..., 'agile', 2)` line（gray） | agile 演算法適合快速變化指標 |
-| Sum(Requests) | request 1: `as_count()` line（blue）<br>request 2: `anomalies(as_rate(), 'agile', 2)` line（gray） | 同時顯示累計量與異常帶 |
+| P99 Latency | request 1: `p99:` line（**orange**）<br>request 2: `anomalies(p99:..., 'robust', 2)` line（gray, solid, thin） | robust 演算法適合穩定週期性指標 |
+| Error Rate | request 1: `errors/total*100` bars（**red**）<br>request 2: `anomalies(errors/total*100, 'agile', 2)` line（gray, solid, thin） | agile 演算法適合快速變化指標 |
+| Sum(Requests) | request 1: `as_count()` line（**blue**）<br>request 2: `as_rate()` + formula `anomalies(query1, 'agile', 2)` line（gray, solid, thin）<br>request 3/4: overlay（marker） | 累計量 + 異常帶 + 警示線 |
 
 ### Event Overlay（所有 timeseries widget 均有）
 
