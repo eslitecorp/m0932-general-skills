@@ -18,7 +18,8 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   CORTEX_API_KEY: ${{ secrets.CORTEX_API_KEY }}
   CORTEX_API_KEY_ID: ${{ secrets.CORTEX_API_KEY_ID }}
-  CORTEX_API_URL: https://api-twes.xdr.tw.paloaltonetworks.com
+  CORTEX_API_URL: https://essc.xdr.sg.paloaltonetworks.com
+  CORTEX_CLI_VERSION: 0.8.11
 
 jobs:
   checkov:
@@ -67,35 +68,58 @@ jobs:
   cortex-upload:
     name: Cortex Cloud 上傳
     runs-on: ubuntu-latest
-    continue-on-error: true  # Palo Alto 後端 500 暫時容錯，待服務恢復後移除
+    continue-on-error: true  # FIDO 強制認證導致 API Key 無法在 CI 使用，待管理員建立不受 FIDO 限制的 Service Account API Key 後移除
     steps:
       - name: Checkout 程式碼
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: 下載 Cortex CLI
+      - name: 安裝相依套件
         run: |
-          set -x
-          crtx_resp=$(curl "${CORTEX_API_URL}/public_api/v1/unified-cli/releases/download-link?os=linux&architecture=amd64" \
-            -H "x-xdr-auth-id: ${CORTEX_API_KEY_ID}" \
-            -H "Authorization: ${CORTEX_API_KEY}")
-          crtx_url=$(echo $crtx_resp | jq -r ".signed_url")
-          curl -o cortexcli $crtx_url
-          chmod +x cortexcli
-          ./cortexcli --version
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq curl
+
+      - name: 取得 Cortex CLI Temporary Token
+        run: |
+          set -e
+          TOKEN_RESPONSE=$(curl -s --location \
+            "${CORTEX_API_URL}/public_api/cas/v1/cortex-cli/create-token" \
+            --header "Authorization: ${CORTEX_API_KEY}" \
+            --header "x-xdr-auth-id: ${CORTEX_API_KEY_ID}" \
+            --header 'Content-Type: application/json' \
+            --data '{}')
+
+          # 先確認回應是否為 JSON（非 HTML 登入頁面）
+          if ! echo "$TOKEN_RESPONSE" | jq -e . > /dev/null 2>&1; then
+            echo "::error::Cortex Cloud API 回傳非 JSON 回應（可能是 HTML 登入頁面），表示 API Key 無效或已過期。"
+            echo "::error::請至 ${CORTEX_API_URL} → Settings → Data Sources & Integrations → GitHub Actions → Generate API key，重新產生 API Key 並更新 GitHub Secrets。"
+            exit 1
+          fi
+
+          TEMP_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.token // empty')
+          if [ -z "$TEMP_TOKEN" ] || [ "$TEMP_TOKEN" = "null" ]; then
+            echo "::error::無法取得 Cortex CLI Token。回應：${TOKEN_RESPONSE}"
+            exit 1
+          fi
+          echo "TEMP_TOKEN=${TEMP_TOKEN}" >> "$GITHUB_ENV"
+
+      - name: 拉取 Cortex CLI Docker Image
+        run: |
+          docker pull \
+            distributions.traps.paloaltonetworks.com/cli-docker/${TEMP_TOKEN}/method:amd64-${CORTEX_CLI_VERSION}
+          docker tag \
+            distributions.traps.paloaltonetworks.com/cli-docker/${TEMP_TOKEN}/method:amd64-${CORTEX_CLI_VERSION} \
+            cortexcli:${CORTEX_CLI_VERSION}
 
       - name: Cortex CLI Code Scan 上傳
         run: |
-          ./cortexcli \
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            cortexcli:${CORTEX_CLI_VERSION} \
             --api-base-url "${CORTEX_API_URL}" \
             --api-key "${CORTEX_API_KEY}" \
             --api-key-id "${CORTEX_API_KEY_ID}" \
             code scan \
-            --directory "${{ github.workspace }}" \
+            --directory /workspace \
             --repo-id "${{ github.repository }}" \
             --branch "${{ github.ref_name }}" \
             --source "GITHUB_ACTIONS" \
