@@ -79,20 +79,30 @@ jobs:
       - name: 下載 Cortex CLI
         run: |
           set -ex
-          crtx_resp=$(curl -s "${CORTEX_API_URL}/public_api/v1/unified-cli/releases/download-link?os=linux&architecture=amd64" \
+          # 使用 -w 取得 HTTP status code，-D- 輸出 response headers
+          http_code=$(curl -s -o /tmp/crtx_resp.txt -w "%{http_code}" \
+            "${CORTEX_API_URL}/public_api/v1/unified-cli/releases/download-link?os=linux&architecture=amd64" \
             -H "x-xdr-auth-id: ${CORTEX_API_KEY_ID}" \
             -H "Authorization: ${CORTEX_API_KEY}")
+          crtx_resp=$(cat /tmp/crtx_resp.txt)
+          echo "HTTP status: ${http_code}"
+          echo "API response: ${crtx_resp}"
 
-          # 若 API 回傳錯誤則立即失敗，確保 CI 不會跳過資安掃描
-          err_code=$(echo "$crtx_resp" | jq -r '.reply.err_code // empty')
-          if [ -n "$err_code" ]; then
-            err_msg=$(echo "$crtx_resp" | jq -r '.reply.err_msg // "unknown error"')
-            echo "::error::Cortex Cloud API 認證失敗 (err_code=${err_code}): ${err_msg}"
+          # 非 200 表示認證失敗或 API 錯誤
+          if [ "$http_code" != "200" ]; then
+            echo "::error::Cortex Cloud API 回傳 HTTP ${http_code}，認證失敗或 API URL 錯誤。"
             echo "::error::請依照 .github/CORTEX_API_KEY_SETUP.md 重新建立 API Key（Security Level: Standard，Role: CLI）並更新 GitHub Secrets。"
             exit 1
           fi
 
-          crtx_url=$(echo "$crtx_resp" | jq -r ".signed_url")
+          # 確認回應為 JSON 且包含 signed_url
+          crtx_url=$(echo "$crtx_resp" | jq -r '.reply.signed_url // .signed_url // empty' 2>/dev/null || true)
+          if [ -z "$crtx_url" ] || [ "$crtx_url" = "null" ]; then
+            echo "::error::Cortex Cloud API 回應中找不到 signed_url，請確認 API Key 權限。"
+            echo "::error::回應內容：${crtx_resp}"
+            exit 1
+          fi
+
           curl -s -o cortexcli "$crtx_url"
           chmod +x cortexcli
           ./cortexcli --version
