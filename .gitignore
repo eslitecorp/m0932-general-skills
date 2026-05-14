@@ -6,6 +6,9 @@ config.ini
 secrets.*
 credentials.*
 
+# Cortex Cloud API Key 操作說明（含內部 URL，不對外公開）
+.github/CORTEX_API_KEY_SETUP.md
+
 # Python
 venv/
 __pycache__/

@@ -18,7 +18,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   CORTEX_API_KEY: ${{ secrets.CORTEX_API_KEY }}
   CORTEX_API_KEY_ID: ${{ secrets.CORTEX_API_KEY_ID }}
-  CORTEX_API_URL: https://api-twes.xdr.tw.paloaltonetworks.com
+  CORTEX_API_URL: https://essc.xdr.sg.paloaltonetworks.com
 
 jobs:
   checkov:
@@ -67,7 +67,6 @@ jobs:
   cortex-upload:
     name: Cortex Cloud 上傳
     runs-on: ubuntu-latest
-    continue-on-error: true  # Palo Alto 後端 500 暫時容錯，待服務恢復後移除
     steps:
       - name: Checkout 程式碼
         uses: actions/checkout@v4
@@ -79,12 +78,22 @@ jobs:
 
       - name: 下載 Cortex CLI
         run: |
-          set -x
-          crtx_resp=$(curl "${CORTEX_API_URL}/public_api/v1/unified-cli/releases/download-link?os=linux&architecture=amd64" \
+          set -ex
+          crtx_resp=$(curl -s "${CORTEX_API_URL}/public_api/v1/unified-cli/releases/download-link?os=linux&architecture=amd64" \
             -H "x-xdr-auth-id: ${CORTEX_API_KEY_ID}" \
             -H "Authorization: ${CORTEX_API_KEY}")
-          crtx_url=$(echo $crtx_resp | jq -r ".signed_url")
-          curl -o cortexcli $crtx_url
+
+          # 若 API 回傳錯誤則立即失敗，確保 CI 不會跳過資安掃描
+          err_code=$(echo "$crtx_resp" | jq -r '.reply.err_code // empty')
+          if [ -n "$err_code" ]; then
+            err_msg=$(echo "$crtx_resp" | jq -r '.reply.err_msg // "unknown error"')
+            echo "::error::Cortex Cloud API 認證失敗 (err_code=${err_code}): ${err_msg}"
+            echo "::error::請依照 .github/CORTEX_API_KEY_SETUP.md 重新建立 API Key（Security Level: Standard，Role: CLI）並更新 GitHub Secrets。"
+            exit 1
+          fi
+
+          crtx_url=$(echo "$crtx_resp" | jq -r ".signed_url")
+          curl -s -o cortexcli "$crtx_url"
           chmod +x cortexcli
           ./cortexcli --version
 
