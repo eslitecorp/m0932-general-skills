@@ -68,6 +68,7 @@ jobs:
   cortex-upload:
     name: Cortex Cloud 上傳
     runs-on: ubuntu-latest
+    continue-on-error: true  # FIDO 強制認證導致 API Key 無法在 CI 使用，待管理員建立不受 FIDO 限制的 Service Account API Key 後移除
     steps:
       - name: Checkout 程式碼
         uses: actions/checkout@v4
