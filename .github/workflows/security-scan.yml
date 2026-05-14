@@ -86,11 +86,17 @@ jobs:
             --header "x-xdr-auth-id: ${CORTEX_API_KEY_ID}" \
             --header 'Content-Type: application/json' \
             --data '{}')
-          echo "Token response: ${TOKEN_RESPONSE}"
+
+          # 先確認回應是否為 JSON（非 HTML 登入頁面）
+          if ! echo "$TOKEN_RESPONSE" | jq -e . > /dev/null 2>&1; then
+            echo "::error::Cortex Cloud API 回傳非 JSON 回應（可能是 HTML 登入頁面），表示 API Key 無效或已過期。"
+            echo "::error::請至 ${CORTEX_API_URL} → Settings → Data Sources & Integrations → GitHub Actions → Generate API key，重新產生 API Key 並更新 GitHub Secrets。"
+            exit 1
+          fi
+
           TEMP_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.token // empty')
           if [ -z "$TEMP_TOKEN" ] || [ "$TEMP_TOKEN" = "null" ]; then
-            echo "::error::無法取得 Cortex CLI Token，請確認 API Key 是否正確。"
-            echo "::error::回應：${TOKEN_RESPONSE}"
+            echo "::error::無法取得 Cortex CLI Token。回應：${TOKEN_RESPONSE}"
             exit 1
           fi
           echo "TEMP_TOKEN=${TEMP_TOKEN}" >> "$GITHUB_ENV"
