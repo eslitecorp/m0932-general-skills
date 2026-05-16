@@ -4,26 +4,30 @@ validate_skill.py — 在 GitHub Actions 中驗證 PR 的 SKILL.md：
 1. frontmatter schema（name / description / tags）
 2. PR description checklist 全部勾選
 3. 重工偵測（新 skill 的 name/tags 與現有 skill 比對）
+4. tag 白名單檢查（不在清單中發 warning）
 """
 
 import os
 import re
 import glob
 import json
-import yaml
 import jsonschema
 from pathlib import Path
 
 SCHEMA_PATH = ".github/skill-schema.json"
 RESULT_FILE = "validation_result.txt"
 
+VALID_TAGS = {
+    "git", "report", "monitoring", "project-management",
+    "meta", "security", "devops", "api", "ai", "data",
+    "skill", "audit",
+}
+
 errors = []
 warnings = []
 
 
-# ── 1. 找出本次 PR 新增的 SKILL.md ──────────────────────────────────────────
 def get_new_skill_files():
-    """從 git diff 找出新增的 SKILL.md 路徑"""
     import subprocess
     result = subprocess.run(
         ["git", "diff", "--name-only", "--diff-filter=A", "origin/main...HEAD"],
@@ -32,7 +36,6 @@ def get_new_skill_files():
     return [f for f in result.stdout.splitlines() if f.endswith("SKILL.md")]
 
 
-# ── 2. 解析 frontmatter ──────────────────────────────────────────────────────
 def parse_frontmatter(filepath):
     content = Path(filepath).read_text(encoding="utf-8")
     match = re.match(r"^---
@@ -40,13 +43,18 @@ def parse_frontmatter(filepath):
 ---", content, re.DOTALL)
     if not match:
         return None
-    try:
-        return yaml.safe_load(match.group(1))
-    except yaml.YAMLError:
-        return None
+    fm = {}
+    for line in match.group(1).splitlines():
+        m = re.match(r'^(\w[\w-]*):\s*(.+)', line)
+        if m:
+            key, val = m.group(1), m.group(2).strip()
+            if val.startswith('[') and val.endswith(']'):
+                items = re.findall(r'"([^"]+)"|\'([^\']+)\'|([\w-]+)', val)
+                val = [a or b or c for a, b, c in items]
+            fm[key] = val
+    return fm
 
 
-# ── 3. 驗證 schema ───────────────────────────────────────────────────────────
 def validate_schema(filepath, frontmatter):
     with open(SCHEMA_PATH) as f:
         schema = json.load(f)
@@ -56,7 +64,19 @@ def validate_schema(filepath, frontmatter):
         errors.append(f"**{filepath}** frontmatter 錯誤：`{e.message}`")
 
 
-# ── 4. PR description checklist 驗證 ────────────────────────────────────────
+def validate_tags(filepath, frontmatter):
+    tags = frontmatter.get("tags", [])
+    if not isinstance(tags, list):
+        return
+    unknown = [t for t in tags if t not in VALID_TAGS]
+    if unknown:
+        tag_list = ", ".join(f"`{t}`" for t in unknown)
+        warnings.append(
+            f"**{filepath}** 包含非標準 tag：{tag_list}。"
+            f"建議使用：{', '.join(f'`{t}`' for t in sorted(VALID_TAGS))}"
+        )
+
+
 def validate_checklist():
     pr_body = os.environ.get("PR_BODY", "")
     unchecked = re.findall(r"- \[ \]", pr_body)
@@ -66,10 +86,9 @@ def validate_checklist():
         )
 
 
-# ── 5. 重工偵測 ──────────────────────────────────────────────────────────────
 def detect_duplicate(filepath, new_fm):
     new_name = (new_fm.get("name") or "").lower()
-    new_tags = {t.lower() for t in (new_fm.get("tags") or [])}
+    new_tags = {t.lower() for t in (new_fm.get("tags") or []) if isinstance(new_fm.get("tags"), list)}
 
     for existing in glob.glob("*/SKILL.md"):
         if existing == filepath:
@@ -78,7 +97,7 @@ def detect_duplicate(filepath, new_fm):
         if not existing_fm:
             continue
         existing_name = (existing_fm.get("name") or "").lower()
-        existing_tags = {t.lower() for t in (existing_fm.get("tags") or [])}
+        existing_tags = {t.lower() for t in (existing_fm.get("tags") or []) if isinstance(existing_fm.get("tags"), list)}
 
         name_match = new_name and new_name == existing_name
         tag_overlap = new_tags & existing_tags
@@ -90,7 +109,6 @@ def detect_duplicate(filepath, new_fm):
             )
 
 
-# ── 主流程 ───────────────────────────────────────────────────────────────────
 def main():
     new_files = get_new_skill_files()
 
@@ -102,9 +120,9 @@ def main():
             errors.append(f"**{filepath}** 缺少有效的 YAML frontmatter（需要 `---` 包圍）")
             continue
         validate_schema(filepath, fm)
+        validate_tags(filepath, fm)
         detect_duplicate(filepath, fm)
 
-    # ── 產出 comment 內容 ───────────────────────────────────────────────────
     lines = []
     if errors:
         lines.append("## ❌ Skill Lint 未通過
@@ -113,12 +131,10 @@ def main():
             lines.append(f"- {e}")
     if warnings:
         lines.append("
-## ⚠️ 重工偵測警告
+## ⚠️ 注意事項
 ")
         for w in warnings:
             lines.append(f"- {w}")
-        lines.append("
-> 請確認與現有 skill 無重複後在 PR description 補充說明。")
     if not errors and not warnings and new_files:
         lines.append("## ✅ Skill Lint 通過
 ")
