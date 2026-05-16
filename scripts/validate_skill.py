@@ -77,10 +77,16 @@ def validate_tags(filepath, frontmatter):
 
 def validate_checklist():
     pr_body = os.environ.get("PR_BODY", "")
-    unchecked = re.findall(r"- \[ \]", pr_body)
+    # 只驗 "## 確認清單" 區塊，避免誤判 Test plan 等其他區塊的 checkbox
+    section_match = re.search(r"## 確認清單\n(.*?)(?=\n##|\Z)", pr_body, re.DOTALL)
+    if not section_match:
+        errors.append("PR description 缺少 `## 確認清單` 區塊，請使用 PR template。")
+        return
+    section = section_match.group(1)
+    unchecked = re.findall(r"- \[ \]", section)
     if unchecked:
         errors.append(
-            f"PR checklist 有 **{len(unchecked)}** 項未勾選，請確認所有項目都打 `[x]`"
+            f"確認清單有 **{len(unchecked)}** 項未勾選，請確認所有項目都打 `[x]`"
         )
 
 
