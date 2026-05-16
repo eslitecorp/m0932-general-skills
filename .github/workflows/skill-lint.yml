@@ -1,0 +1,45 @@
+name: Skill Lint
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  validate-frontmatter:
+    name: Validate SKILL.md frontmatter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安裝 Python 依賴
+        run: pip install pyyaml jsonschema
+
+      - name: 驗證 frontmatter schema + PR checklist + 重工偵測
+        id: validate
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: python3 scripts/validate_skill.py
+
+      - name: 貼驗證結果 comment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            if (!fs.existsSync('validation_result.txt')) return;
+            const body = fs.readFileSync('validation_result.txt', 'utf8');
+            if (!body.trim()) return;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });
