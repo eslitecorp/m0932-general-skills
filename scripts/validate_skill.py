@@ -38,9 +38,7 @@ def get_new_skill_files():
 
 def parse_frontmatter(filepath):
     content = Path(filepath).read_text(encoding="utf-8")
-    match = re.match(r"^---
-(.*?)
----", content, re.DOTALL)
+    match = re.match(r"^---\r?\n(.*?)\r?\n---", content, re.DOTALL)
     if not match:
         return None
     fm = {}
@@ -90,7 +88,7 @@ def detect_duplicate(filepath, new_fm):
     new_name = (new_fm.get("name") or "").lower()
     new_tags = {t.lower() for t in (new_fm.get("tags") or []) if isinstance(new_fm.get("tags"), list)}
 
-    for existing in glob.glob("*/SKILL.md"):
+    for existing in glob.glob("**/SKILL.md", recursive=True):
         if existing == filepath:
             continue
         existing_fm = parse_frontmatter(existing)
