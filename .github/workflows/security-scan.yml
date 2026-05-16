@@ -1,4 +1,4 @@
-name: Security Scan (Checkov / Cortex Cloud)
+name: Security Scan
 
 on:
   pull_request:
@@ -11,116 +11,79 @@ on:
 
 permissions:
   contents: read
-  security-events: write  # 上傳 SARIF 到 GitHub Security tab
+  security-events: write
   actions: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  CORTEX_API_KEY: ${{ secrets.CORTEX_API_KEY }}
-  CORTEX_API_KEY_ID: ${{ secrets.CORTEX_API_KEY_ID }}
-  CORTEX_API_URL: https://essc.xdr.sg.paloaltonetworks.com
-  CORTEX_CLI_VERSION: 0.8.11
 
 jobs:
-  checkov:
-    name: Checkov IaC & Secrets Scan
+  checkov-secrets:
+    name: Checkov Secrets Scan（強制）
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout 程式碼
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Checkov 資安掃描
-        id: checkov
+      - name: Checkov secrets 掃描
         uses: bridgecrewio/checkov-action@v12
         with:
-          # 掃描整個 repo
           directory: .
-          # 掃描項目：GitHub Actions 設定 + 機密偵測 + 一般設定檔
-          framework: github_actions,secrets
-          # 同時輸出 CLI（顯示在 log）與 SARIF（上傳 Security tab）
+          framework: secrets
           output_format: cli,sarif
-          output_file_path: console,results.sarif
-          # 不把 venv 等非必要目錄納入掃描
+          output_file_path: console,results-secrets.sarif
           skip_path: >-
             youtrack-report/venv,
             .git
-          # soft_fail: true → 掃出問題時不阻擋 PR，僅作警示（初期建議）
-          # 待團隊熟悉後可改為 false 強制阻擋
+          soft_fail: false
+        env:
+          LOG_LEVEL: WARNING
+
+      - name: 確認 SARIF 存在
+        if: success() || failure()
+        run: |
+          if [ ! -f results-secrets.sarif ]; then
+            echo '{"version":"2.1.0","$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json","runs":[]}' > results-secrets.sarif
+          fi
+
+      - name: 上傳 SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        if: success() || failure()
+        with:
+          sarif_file: results-secrets.sarif
+          category: checkov-secrets
+
+  checkov-iac:
+    name: Checkov IaC Scan（警示）
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkov GitHub Actions 掃描
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: .
+          framework: github_actions
+          output_format: cli,sarif
+          output_file_path: console,results-iac.sarif
+          skip_path: >-
+            youtrack-report/venv,
+            .git
           soft_fail: true
         env:
           LOG_LEVEL: WARNING
 
-      - name: 確認 SARIF 檔案存在
+      - name: 確認 SARIF 存在
         if: success() || failure()
         run: |
-          if [ ! -f results.sarif ]; then
-            echo '{"version":"2.1.0","$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json","runs":[]}' > results.sarif
+          if [ ! -f results-iac.sarif ]; then
+            echo '{"version":"2.1.0","$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json","runs":[]}' > results-iac.sarif
           fi
 
-      - name: 上傳 SARIF 至 GitHub Security
+      - name: 上傳 SARIF
         uses: github/codeql-action/upload-sarif@v4
         if: success() || failure()
         with:
-          sarif_file: results.sarif
-          category: checkov
-
-  cortex-upload:
-    name: Cortex Cloud 上傳
-    runs-on: ubuntu-latest
-    continue-on-error: true  # FIDO 強制認證導致 API Key 無法在 CI 使用，待管理員建立不受 FIDO 限制的 Service Account API Key 後移除
-    steps:
-      - name: Checkout 程式碼
-        uses: actions/checkout@v4
-
-      - name: 安裝相依套件
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq jq curl
-
-      - name: 取得 Cortex CLI Temporary Token
-        run: |
-          set -e
-          TOKEN_RESPONSE=$(curl -s --location \
-            "${CORTEX_API_URL}/public_api/cas/v1/cortex-cli/create-token" \
-            --header "Authorization: ${CORTEX_API_KEY}" \
-            --header "x-xdr-auth-id: ${CORTEX_API_KEY_ID}" \
-            --header 'Content-Type: application/json' \
-            --data '{}')
-
-          # 先確認回應是否為 JSON（非 HTML 登入頁面）
-          if ! echo "$TOKEN_RESPONSE" | jq -e . > /dev/null 2>&1; then
-            echo "::error::Cortex Cloud API 回傳非 JSON 回應（可能是 HTML 登入頁面），表示 API Key 無效或已過期。"
-            echo "::error::請至 ${CORTEX_API_URL} → Settings → Data Sources & Integrations → GitHub Actions → Generate API key，重新產生 API Key 並更新 GitHub Secrets。"
-            exit 1
-          fi
-
-          TEMP_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.token // empty')
-          if [ -z "$TEMP_TOKEN" ] || [ "$TEMP_TOKEN" = "null" ]; then
-            echo "::error::無法取得 Cortex CLI Token。回應：${TOKEN_RESPONSE}"
-            exit 1
-          fi
-          echo "TEMP_TOKEN=${TEMP_TOKEN}" >> "$GITHUB_ENV"
-
-      - name: 拉取 Cortex CLI Docker Image
-        run: |
-          docker pull \
-            distributions.traps.paloaltonetworks.com/cli-docker/${TEMP_TOKEN}/method:amd64-${CORTEX_CLI_VERSION}
-          docker tag \
-            distributions.traps.paloaltonetworks.com/cli-docker/${TEMP_TOKEN}/method:amd64-${CORTEX_CLI_VERSION} \
-            cortexcli:${CORTEX_CLI_VERSION}
-
-      - name: Cortex CLI Code Scan 上傳
-        run: |
-          docker run --rm \
-            -v "${{ github.workspace }}:/workspace" \
-            cortexcli:${CORTEX_CLI_VERSION} \
-            --api-base-url "${CORTEX_API_URL}" \
-            --api-key "${CORTEX_API_KEY}" \
-            --api-key-id "${CORTEX_API_KEY_ID}" \
-            code scan \
-            --directory /workspace \
-            --repo-id "${{ github.repository }}" \
-            --branch "${{ github.ref_name }}" \
-            --source "GITHUB_ACTIONS" \
-            --create-repo-if-missing
+          sarif_file: results-iac.sarif
+          category: checkov-iac
