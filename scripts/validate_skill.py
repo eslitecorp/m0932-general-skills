@@ -116,7 +116,9 @@ def detect_duplicate(filepath, new_fm):
 def main():
     new_files = get_new_skill_files()
 
-    validate_checklist()
+    # 只有 PR 包含新 SKILL.md 時才驗 checklist，純基礎建設 PR 不需要
+    if new_files:
+        validate_checklist()
 
     for filepath in new_files:
         fm = parse_frontmatter(filepath)
