@@ -1,5 +1,6 @@
 ---
 name: youtrack-report
+tags: ["report", "project-management"]
 description: "連線 YouTrack 自動產生包含上週完成與未完成事項的 Markdown 週報。觸發語句：「幫我產週報」、「產生 YouTrack 週報」、「youtrack report」、「/youtrack-report」。"
 ---
 
