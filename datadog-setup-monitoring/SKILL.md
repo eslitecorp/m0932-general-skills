@@ -1,5 +1,6 @@
 ---
 name: datadog-setup-monitoring
+tags: ["monitoring", "devops", "api"]
 description: "為指定 API 端點建立 Datadog 完整監控：3 個 Anomaly Monitor（Error Rate + P99 Latency + Request Rate）+ 2 個 Anomaly SLO（Availability + P99 Latency，Monitor-based）+ Dashboard section（含 anomaly overlay + event overlay）。觸發語句範例：「幫我把 GET /api/v3/orders 建立基本監控和 SLO」、「/datadog-setup-monitoring」。"
 argument-hint: "[service] [\"METHOD /path\"] [resource-filter] [p99-threshold or auto]"
 allowed-tools: Bash
