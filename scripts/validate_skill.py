@@ -18,9 +18,9 @@ SCHEMA_PATH = ".github/skill-schema.json"
 RESULT_FILE = "validation_result.txt"
 
 VALID_TAGS = {
-    "git", "report", "monitoring", "project-management",
-    "meta", "security", "devops", "api", "ai", "data",
-    "skill", "audit",
+    "git", "api", "devops", "monitoring", "security",
+    "testing", "report", "project-management", "documentation",
+    "product", "communication", "data", "ai", "meta", "audit", "skill",
 }
 
 errors = []
@@ -73,7 +73,7 @@ def validate_tags(filepath, frontmatter):
         tag_list = ", ".join(f"`{t}`" for t in unknown)
         warnings.append(
             f"**{filepath}** 包含非標準 tag：{tag_list}。"
-            f"建議使用：{', '.join(f'`{t}`' for t in sorted(VALID_TAGS))}"
+            f"建議從 [Tag 清單](https://github.com/eslitecorp/m0932-general-skills/wiki/Tag-%E6%B8%85%E5%96%AE) 中選擇。"
         )
 
 
