@@ -123,24 +123,19 @@ def main():
 
     lines = []
     if errors:
-        lines.append("## ❌ Skill Lint 未通過
-")
+        lines.append("## ❌ Skill Lint 未通過\n")
         for e in errors:
             lines.append(f"- {e}")
     if warnings:
-        lines.append("
-## ⚠️ 注意事項
-")
+        lines.append("\n## ⚠️ 注意事項\n")
         for w in warnings:
             lines.append(f"- {w}")
     if not errors and not warnings and new_files:
-        lines.append("## ✅ Skill Lint 通過
-")
+        lines.append("## ✅ Skill Lint 通過\n")
         lines.append(f"驗證了 {len(new_files)} 個新 SKILL.md，無問題。")
 
     with open(RESULT_FILE, "w", encoding="utf-8") as f:
-        f.write("
-".join(lines))
+        f.write("\n".join(lines))
 
     if errors:
         raise SystemExit(1)
