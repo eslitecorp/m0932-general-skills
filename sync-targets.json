@@ -1,0 +1,34 @@
+{
+  "_comment": "管理 skill 同步的 target repo 清單。新增 target 只要在此加一筆，sync workflow 會自動處理。",
+  "targets": [
+    {
+      "platform": "github",
+      "repo": "eslitecorp/CHANGE_ME",
+      "enabled": false,
+      "tools": {
+        "claude-code": ".claude/skills",
+        "roo-code": ".roo/rules",
+        "antigravity": ".antigravity/rules"
+      }
+    }
+  ],
+  "_platforms": {
+    "github": {
+      "auth": "GITHUB_TOKEN secret",
+      "sync_method": "github_actions"
+    },
+    "gitlab": {
+      "auth": "GITLAB_TOKEN secret",
+      "sync_method": "gitlab_ci",
+      "_example": {
+        "platform": "gitlab",
+        "repo": "eslitecorp/some-repo",
+        "enabled": false,
+        "tools": {
+          "claude-code": ".claude/skills",
+          "roo-code": ".roo/rules"
+        }
+      }
+    }
+  }
+}

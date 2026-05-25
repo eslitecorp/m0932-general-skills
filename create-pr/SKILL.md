@@ -1,5 +1,6 @@
 ---
 name: create-pr
+tags: ["git", "devops"]
 description: "分析 git diff 將變更分類成獨立的 atomic commits（gitmoji 格式，繁體中文訊息），並建立 PR 到預設主線分支。觸發語句：「幫我建立 PR」、「commit 並開 PR」、「create pr」、「/create-pr」。"
 ---
 
