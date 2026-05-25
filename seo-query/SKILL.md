@@ -1,7 +1,7 @@
 ---
 name: seo-query
 description: "查詢 Eslite 誠品線上 Astro 商品頁 SSR 效能與 SEO 數據，包含 render time 統計、cache hit rate、404 異常率，以及各 bot 流量分析。觸發語句：「SSR 效能如何」、「查昨天 render time」、「/seo-query」。"
-tags: ["seo", "ssr", "performance"]
+tags: ["report", "ai"]
 ---
 
 # SEO Query — 商品頁 SSR 效能查詢
