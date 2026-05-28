@@ -192,7 +192,7 @@ def check_dependabot_coverage():
 
     result = subprocess.run(
         ["git", "diff", "--name-only", "--diff-filter=A", "origin/main...HEAD"],
-        capture_output=True, text=True
+        capture_output=True, text=True, check=True
     )
     new_req_files = [f for f in result.stdout.splitlines() if f.endswith("requirements.txt")]
 
