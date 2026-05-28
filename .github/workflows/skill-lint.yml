@@ -21,13 +21,8 @@ jobs:
       - name: 安裝 Python 依賴
         run: pip install pyyaml jsonschema
 
-      - name: 驗證 frontmatter schema + PR checklist + 重工偵測
+      - name: 驗證 frontmatter schema + 重工偵測
         id: validate
-        env:
-          PR_BODY: ${{ github.event.pull_request.body }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
         run: python3 scripts/validate_skill.py
 
       - name: 貼驗證結果 comment

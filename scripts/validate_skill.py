@@ -2,12 +2,12 @@
 """
 validate_skill.py — 在 GitHub Actions 中驗證 PR 的 SKILL.md：
 1. frontmatter schema（name / description / tags）
-2. PR description checklist 全部勾選
-3. 重工偵測（新 skill 的 name/tags 與現有 skill 比對）
-4. tag 白名單檢查（不在清單中發 warning）
+2. 重工偵測（新 skill 的 name/tags 與現有 skill 比對）
+3. tag 白名單檢查（不在清單中發 warning）
+
+確認清單勾選由 PR reviewer 人工確認，不在自動驗證範圍內。
 """
 
-import os
 import re
 import glob
 import json
@@ -75,21 +75,6 @@ def validate_tags(filepath, frontmatter):
         )
 
 
-def validate_checklist():
-    pr_body = os.environ.get("PR_BODY", "")
-    # 只驗 "## 確認清單" 區塊，避免誤判 Test plan 等其他區塊的 checkbox
-    section_match = re.search(r"## 確認清單\n(.*?)(?=\n##|\Z)", pr_body, re.DOTALL)
-    if not section_match:
-        errors.append("PR description 缺少 `## 確認清單` 區塊，請使用 PR template。")
-        return
-    section = section_match.group(1)
-    unchecked = re.findall(r"- \[ \]", section)
-    if unchecked:
-        errors.append(
-            f"確認清單有 **{len(unchecked)}** 項未勾選，請確認所有項目都打 `[x]`"
-        )
-
-
 def detect_duplicate(filepath, new_fm):
     new_name = (new_fm.get("name") or "").lower()
     new_tags = {t.lower() for t in (new_fm.get("tags") or []) if isinstance(new_fm.get("tags"), list)}
@@ -115,10 +100,6 @@ def detect_duplicate(filepath, new_fm):
 
 def main():
     new_files = get_new_skill_files()
-
-    # 只有 PR 包含新 SKILL.md 時才驗 checklist，純基礎建設 PR 不需要
-    if new_files:
-        validate_checklist()
 
     for filepath in new_files:
         fm = parse_frontmatter(filepath)
