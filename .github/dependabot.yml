@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # GitHub Actions SHA pin 自動更新（取代手動維護 SHA）
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # Python 依賴 CVE 修補（取代 pip-audit workflow）
+  - package-ecosystem: "pip"
+    directory: "/youtrack-report"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+
+  - package-ecosystem: "pip"
+    directory: "/datadog-setup-monitoring"
+    schedule:
+      interval: "weekly"
+      day: "monday"
