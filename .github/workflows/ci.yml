@@ -1,0 +1,123 @@
+name: CI
+
+# 合併 security-scan + skill-lint，統一管理 CI 行為。
+#
+# 補強來源：
+#   concurrency  — GitHub Docs "Using concurrency"
+#                  https://docs.github.com/en/actions/using-jobs/using-concurrency
+#   timeout      — GitHub Docs "Setting a timeout period for jobs"
+#                  https://docs.github.com/en/actions/using-jobs/setting-a-timeout-period-for-jobs-in-a-workflow
+#   permissions  — OpenSSF Scorecard "Token-Permissions" check（公信力：Linux Foundation 旗下，
+#                  CISA/Google/Microsoft 共同維護）
+#                  https://github.com/ossf/scorecard/blob/main/docs/checks.md#token-permissions
+#                  GitHub Docs "Security hardening for GitHub Actions"
+#                  https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-permissions-for-the-github_token
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# 同一 PR 有新 push 時取消舊的 run，避免 CI 資源浪費與結果混淆。
+# Ref: GitHub Docs "Using concurrency"
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# 全域最小權限：所有 job 預設無任何 token 權限，需要時於 job 層級明確授予。
+# Ref: OpenSSF Scorecard Token-Permissions, GitHub security hardening guide
+permissions: {}
+
+jobs:
+
+  # ── IaC 安全掃描 ────────────────────────────────────────────────
+  # 目的：強制 GitHub Actions workflow 使用 SHA pin（防 Actions 供應鏈攻擊）
+  # 觸發：PR + push to main（防 bypass）
+  # Ref: Checkov CKV_GHA_7 "Ensure actions are pinned to a full length commit SHA"
+  #      https://www.checkov.io/5.Policy%20Index/github_actions.html
+  checkov-iac:
+    name: Checkov IaC Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Checkov GitHub Actions 掃描
+        uses: bridgecrewio/checkov-action@4ad414b100f8415d05d88b6be40d7aa7aa38c057  # v12.2941.0
+        with:
+          directory: .
+          framework: github_actions
+          output_format: cli,sarif
+          output_file_path: console,results-iac.sarif
+          skip_path: >-
+            youtrack-report/venv,
+            .git
+          soft_fail: false
+        env:
+          LOG_LEVEL: WARNING
+
+      - name: 確認 SARIF 存在
+        if: success() || failure()
+        run: |
+          if [ ! -f results-iac.sarif ]; then
+            echo '{"version":"2.1.0","$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json","runs":[]}' > results-iac.sarif
+          fi
+
+      - name: 上傳 SARIF
+        uses: github/codeql-action/upload-sarif@f0213c31c702f929cf06ddb900ac315d246a8997  # v4.33.0
+        if: success() || failure()
+        with:
+          sarif_file: results-iac.sarif
+          category: checkov-iac
+
+  # ── Skill 內容驗證 ──────────────────────────────────────────────
+  # 目的：
+  #   1. frontmatter schema 合規（name / description / tags）
+  #   2. 重工偵測
+  #   3. Prompt injection 掃描（OWASP LLM01:2025）
+  #   4. 危險 bash 指令偵測（CWE-78）
+  # 觸發：僅 PR（push to main 不需要，因為必須經過 PR）
+  skill-lint:
+    name: Skill Lint
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: 安裝 Python 依賴
+        run: pip install pyyaml jsonschema
+
+      - name: 驗證 frontmatter schema + 重工偵測 + 內容安全掃描
+        id: validate
+        run: python3 scripts/validate_skill.py
+
+      - name: 貼驗證結果 comment
+        if: always()
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
+        with:
+          script: |
+            const fs = require('fs');
+            if (!fs.existsSync('validation_result.txt')) return;
+            const body = fs.readFileSync('validation_result.txt', 'utf8');
+            if (!body.trim()) return;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });

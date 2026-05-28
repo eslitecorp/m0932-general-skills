@@ -4,6 +4,7 @@ validate_skill.py — 在 GitHub Actions 中驗證 PR 的 SKILL.md：
 1. frontmatter schema（name / description / tags）
 2. 重工偵測（新 skill 的 name/tags 與現有 skill 比對）
 3. tag 白名單檢查（不在清單中發 warning）
+4. 內容安全掃描（prompt injection、危險 bash 指令）
 
 確認清單勾選由 PR reviewer 人工確認，不在自動驗證範圍內。
 """
@@ -11,6 +12,7 @@ validate_skill.py — 在 GitHub Actions 中驗證 PR 的 SKILL.md：
 import re
 import glob
 import json
+import subprocess
 import jsonschema
 from pathlib import Path
 
@@ -23,14 +25,62 @@ VALID_TAGS = {
     "product", "communication", "data", "ai", "meta", "audit", "skill",
 }
 
+# Prompt injection patterns — error (hard fail)
+# Ref: OWASP LLM01:2025, Lakera Prompt Injection Guide
+PROMPT_INJECTION_PATTERNS = [
+    (r'(?i)ignore\s+(previous|prior|all|your)\s+instructions?',
+     '疑似 prompt injection：ignore instructions'),
+    (r'(?i)disregard\s+(previous|prior|all|your|the)\s+(instructions?|guidelines?|rules?)',
+     '疑似 prompt injection：disregard instructions'),
+    (r'(?i)override\s+(your|the|all)\s+(instructions?|guidelines?|rules?|constraints?|directives?)',
+     '疑似 prompt injection：override instructions'),
+    (r'(?i)forget\s+(your|the|all|previous|prior)\s+(instructions?|guidelines?|rules?)',
+     '疑似 prompt injection：forget instructions'),
+    (r'(?i)you\s+are\s+now\s+(?:a\s+)?(?:different|new|another)\s+(?:ai|model|assistant|bot)',
+     '疑似角色覆蓋：you are now a different AI'),
+    (r'(?i)act\s+as\s+(?:an?\s+)?(?:unrestricted|jailbreak|evil|malicious|unfiltered)',
+     '疑似 jailbreak：act as unrestricted'),
+    (r'(?i)###\s*SYSTEM(?:\s+PROMPT)?',
+     '疑似 system prompt 注入標記：### SYSTEM'),
+    (r'忽略(?:之前|前面|上方|所有)的?指(?:令|示)',
+     '疑似 prompt injection（中文）：忽略指令'),
+    (r'(?:請|你)?(?:現在)?成為(?:一個?)?(?:不受限|惡意|越獄)',
+     '疑似角色覆蓋（中文）'),
+]
+
+# Dangerous bash patterns — warning
+# Ref: CWE-78 OS Command Injection, CWE-88 Argument Injection
+DANGEROUS_BASH_PATTERNS = [
+    (r'rm\s+-[rf]+\s+[/~]',
+     '`rm -rf /` 或 `rm -rf ~`（刪除根目錄／家目錄）'),
+    (r'(?:curl|wget)\s+[^\n|]*\|\s*(?:bash|sh|zsh|fish)(?:\s|$)',
+     'curl/wget pipe to shell（供應鏈風險）'),
+    (r'(?<!\w)\|\s*bash(?:\s|;|$|\n)',
+     'pipe to bash（動態執行風險）'),
+    (r'git\s+push\s+[^\n]*--force(?!-with-lease)',
+     'git push --force（建議使用 --force-with-lease）'),
+    (r'chmod\s+[0-9]*777',
+     'chmod 777（過寬的權限設定）'),
+    (r'eval\s+["\'\`]',
+     'eval 動態執行字串'),
+]
+
 errors = []
 warnings = []
 
 
 def get_new_skill_files():
-    import subprocess
     result = subprocess.run(
         ["git", "diff", "--name-only", "--diff-filter=A", "origin/main...HEAD"],
+        capture_output=True, text=True
+    )
+    return [f for f in result.stdout.splitlines() if f.endswith("SKILL.md")]
+
+
+def get_changed_skill_files():
+    """Return Added + Modified SKILL.md files for security scanning."""
+    result = subprocess.run(
+        ["git", "diff", "--name-only", "--diff-filter=AM", "origin/main...HEAD"],
         capture_output=True, text=True
     )
     return [f for f in result.stdout.splitlines() if f.endswith("SKILL.md")]
@@ -98,9 +148,69 @@ def detect_duplicate(filepath, new_fm):
             )
 
 
+def scan_content_security(filepath):
+    """Scan SKILL.md content for prompt injection and dangerous bash patterns.
+
+    Prompt injection patterns → error (hard fail).
+    Dangerous bash patterns   → warning.
+
+    Ref: OWASP LLM01:2025, CWE-78, Lakera Prompt Injection Guide.
+    """
+    content = Path(filepath).read_text(encoding="utf-8")
+
+    for pattern, desc in PROMPT_INJECTION_PATTERNS:
+        if re.search(pattern, content):
+            errors.append(
+                f"**{filepath}** 🔴 安全掃描：{desc}（OWASP LLM01 Prompt Injection）"
+            )
+
+    # Strip frontmatter before scanning for bash patterns
+    fm_match = re.match(r'^---\r?\n.*?\r?\n---\r?\n?', content, re.DOTALL)
+    body = content[fm_match.end():] if fm_match else content
+
+    for pattern, desc in DANGEROUS_BASH_PATTERNS:
+        if re.search(pattern, body):
+            warnings.append(
+                f"**{filepath}** ⚠️ 危險指令：{desc}（CWE-78）"
+            )
+
+
+def check_dependabot_coverage():
+    """Warn when a new requirements.txt has no matching entry in dependabot.yml.
+
+    Dependabot.yml must be manually updated when a new skill adds Python deps;
+    this check prevents that from being silently missed.
+    """
+    dependabot_path = Path(".github/dependabot.yml")
+    if not dependabot_path.exists():
+        warnings.append(
+            "**.github/dependabot.yml** 不存在，Python 依賴 CVE 將無法自動偵測。"
+        )
+        return
+
+    dependabot_text = dependabot_path.read_text(encoding="utf-8")
+
+    result = subprocess.run(
+        ["git", "diff", "--name-only", "--diff-filter=A", "origin/main...HEAD"],
+        capture_output=True, text=True
+    )
+    new_req_files = [f for f in result.stdout.splitlines() if f.endswith("requirements.txt")]
+
+    for req_file in new_req_files:
+        skill_dir = "/" + str(Path(req_file).parent)
+        if skill_dir not in dependabot_text:
+            warnings.append(
+                f"**{req_file}** 新增了 Python 依賴，但 `.github/dependabot.yml` "
+                f"尚未加入 `directory: \"{skill_dir}\"` 條目。"
+                f"請更新 dependabot.yml，否則 Dependabot 不會掃描此 skill 的 CVE。"
+            )
+
+
 def main():
     new_files = get_new_skill_files()
+    changed_files = get_changed_skill_files()
 
+    # Schema / tag / duplicate checks: Added files only
     for filepath in new_files:
         fm = parse_frontmatter(filepath)
         if fm is None:
@@ -109,6 +219,15 @@ def main():
         validate_schema(filepath, fm)
         validate_tags(filepath, fm)
         detect_duplicate(filepath, fm)
+
+    # Content security scan: Added + Modified files
+    for filepath in changed_files:
+        if not Path(filepath).exists():
+            continue
+        scan_content_security(filepath)
+
+    # Dependabot coverage check: new requirements.txt without dependabot entry
+    check_dependabot_coverage()
 
     lines = []
     if errors:
@@ -119,9 +238,13 @@ def main():
         lines.append("\n## ⚠️ 注意事項\n")
         for w in warnings:
             lines.append(f"- {w}")
-    if not errors and not warnings and new_files:
+
+    scanned = set(new_files) | set(changed_files)
+    if not errors and not warnings and scanned:
+        new_count = len(new_files)
+        mod_count = len(set(changed_files) - set(new_files))
         lines.append("## ✅ Skill Lint 通過\n")
-        lines.append(f"驗證了 {len(new_files)} 個新 SKILL.md，無問題。")
+        lines.append(f"驗證了 {new_count} 個新 SKILL.md、{mod_count} 個已修改 SKILL.md，無問題。")
 
     with open(RESULT_FILE, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))

@@ -1,11 +1,15 @@
 # 所有進入 main 分支的 PR 皆需要 Code Owner 審查
-# 格式：路徑模式 @owner1 @owner2
+# 格式：路徑模式 @org/team-slug
 # 參考：https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
 
-# 全域預設：所有檔案皆需要 @neohsiung 與 @rammus 審查
-* @Neo-eslite @rammus-eslite
+# 全域預設：所有檔案皆需要 M0932 Team Manager 審查
+* @eslitecorp/m0932-team-manager
+
+# sync-targets.json 控制 skill 同步目標（影響全團隊），需 Team Manager 明確審查
+# 修改時請在 PR 說明同步目標與原因，並連結對應 Issue
+/sync-targets.json @eslitecorp/m0932-team-manager
 
 # 每個 skill 資料夾由對應負責人審查（可依需求新增）
-# /youtrack-report/   @neohsiung
-# /create-pr/         @neohsiung
-# /create-skill/      @neohsiung
+# /youtrack-report/   @eslitecorp/m0932-team-manager
+# /create-pr/         @eslitecorp/m0932-team-manager
+# /create-skill/      @eslitecorp/m0932-team-manager
