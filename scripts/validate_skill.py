@@ -72,7 +72,7 @@ warnings = []
 def get_new_skill_files():
     result = subprocess.run(
         ["git", "diff", "--name-only", "--diff-filter=A", "origin/main...HEAD"],
-        capture_output=True, text=True
+        capture_output=True, text=True, check=True
     )
     return [f for f in result.stdout.splitlines() if f.endswith("SKILL.md")]
 
