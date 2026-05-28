@@ -81,7 +81,7 @@ def get_changed_skill_files():
     """Return Added + Modified SKILL.md files for security scanning."""
     result = subprocess.run(
         ["git", "diff", "--name-only", "--diff-filter=AM", "origin/main...HEAD"],
-        capture_output=True, text=True
+        capture_output=True, text=True, check=True
     )
     return [f for f in result.stdout.splitlines() if f.endswith("SKILL.md")]
 
