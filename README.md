@@ -29,3 +29,4 @@
 | Skill | 說明 |
 | --- | --- |
 | [datadog-setup-monitoring](datadog-setup-monitoring/) | 設定 Datadog 監控，建立 Dashboard、SLA/SLO 指標與告警規則 |
+| [seo-query](seo-query/) | 查詢誠品線上 Astro 商品頁 SSR 效能與 SEO 數據，解讀 render time 與異常指標 |
