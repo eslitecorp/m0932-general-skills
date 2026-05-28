@@ -197,7 +197,7 @@ def check_dependabot_coverage():
     new_req_files = [f for f in result.stdout.splitlines() if f.endswith("requirements.txt")]
 
     for req_file in new_req_files:
-        skill_dir = "/" + str(Path(req_file).parent)
+        skill_dir = "/" + Path(req_file).parent.as_posix()
         if skill_dir not in dependabot_text:
             warnings.append(
                 f"**{req_file}** 新增了 Python 依賴，但 `.github/dependabot.yml` "
