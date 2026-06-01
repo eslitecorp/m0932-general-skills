@@ -97,7 +97,7 @@ Sheet 每列代表一個指標，欄位結構如下：
 - `SSR_FOLDER_ID` ← `drive.ssrFolderId`
 - `COMBINED_FOLDER_ID` ← `drive.combinedFolderId`
 - `GSC_SHEET_ID` ← `gscSheet.spreadsheetId`
-- `GSC_SHEET_NAME` ← `gscSheet.sheetName`（需 URL encode，空格轉 `%20`）
+- `GSC_SHEET_NAME` ← `gscSheet.sheetName`（需 URL encode，空格轉 `%20`；若含特殊字元建議整體 encode）
 - `{rollout.phase}`、`{rollout.guidSuffix}`、`{rollout.trafficPercent}` ← 放量階段資訊，用於背景知識說明
 - `{rules.p95WarnMs}`、`{rules.p99WarnMs}`、`{rules.above5sAbnormalPct}`、`{rules.above3to5sWarnPct}` ← 異常判斷門檻
 
@@ -116,7 +116,9 @@ curl -s "https://www.googleapis.com/drive/v3/files?q='${SSR_FOLDER_ID}'+in+paren
 curl -s "https://www.googleapis.com/drive/v3/files?q='${COMBINED_FOLDER_ID}'+in+parents+and+name+contains+'YYYYMMDD'&fields=files(id,name)" \
   -H "Authorization: Bearer $TOKEN"
 # GSC Tracking Sheet（使用 GSC_SHEET_ID 與 GSC_SHEET_NAME）
-curl -s "https://sheets.googleapis.com/v4/spreadsheets/${GSC_SHEET_ID}/values/${GSC_SHEET_NAME}!A1:AZ200" \
+# 工作表名稱含空格時需用單引號包裹並 URL encode（%27 = 單引號，%20 = 空格）
+GSC_RANGE=$(python3 -c "import urllib.parse; print(urllib.parse.quote(\"'${GSC_SHEET_NAME}'\") + '!A1:AZ200')")
+curl -s "https://sheets.googleapis.com/v4/spreadsheets/${GSC_SHEET_ID}/values/${GSC_RANGE}" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
