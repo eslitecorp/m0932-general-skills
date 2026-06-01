@@ -1,0 +1,27 @@
+{
+  "rules": {
+    "p95WarnMs": 3000,
+    "p99WarnMs": 5000,
+    "above5sAbnormalPct": 1,
+    "above3to5sWarnPct": 3,
+    "cacheHitRateWarnPct": 5,
+    "cacheHitRateAbnormalPct": 3,
+    "error404BaselinePct": 8,
+    "error404HealthyPct": 3,
+    "error404WarnPct": 10,
+    "error404AbnormalPct": 15
+  },
+  "rollout": {
+    "phase": "P0",
+    "guidSuffix": "15–19",
+    "trafficPercent": 5
+  },
+  "drive": {
+    "ssrFolderId": "1iXSr0Oc4lEJnSScPMSplI2z9bUNyGpVR",
+    "combinedFolderId": "1w089WQQpTFmkRtLN6jwPE7nFpUzhL2Pi"
+  },
+  "gscSheet": {
+    "spreadsheetId": "1XKaRKwchznWq3CKYLGo8TRPW4QZ3dEqBLEZSk1G_rRQ",
+    "sheetName": "GSC Tracking"
+  }
+}
