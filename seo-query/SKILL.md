@@ -29,8 +29,10 @@ render_time_stats 只涵蓋 cache miss 的請求。
 - `render_time_stats.count_above_3000to5000ms / render_time_stats.total_records` > {rules.above3to5sWarnPct}% → ⚠️ 警告（3–5秒）
 
 **Cache Hit Rate**（cache_hits / 總請求數）
-- < {rules.cacheHitRateWarnPct}% → ⚠️ 警告（P1 放量階段基準約 7–9%）
-- < {rules.cacheHitRateAbnormalPct}% → 🚨 異常
+> 用途：偵測 cache 失效異常，不作為優化目標。
+> 理論上限約 21%（每天 ~2 萬個不重複 URL，多數只被爬一次），延長 TTL 無法改善。
+- < {rules.cacheHitRateWarnPct}% → ⚠️ 警告
+- < {rules.cacheHitRateAbnormalPct}% → 🚨 異常（可能為 cache 被清空或設定錯誤）
 
 **404 Rate**（404 次數 / SSR miss 總數）
 - 目前基準約 {rules.error404BaselinePct}%，SEO 健康目標為 < {rules.error404HealthyPct}%
@@ -186,7 +188,7 @@ GSC Tracking Sheet 已在 Step 2 直接取得，無需額外下載。
 - 使用者需以公司 Google 帳號登入 gcloud，否則 token 取得會失敗：`gcloud auth login`
 - `gcloud auth print-access-token` 取得的 token 有效期約 1 小時，過期需重新執行
 - render_time_stats 只涵蓋 cache miss（進入 Worker）的請求，非全部流量
-- cache hit rate 偏低在放量階段為預期行為，不代表異常
+- cache hit rate 偏低的根本原因是 URL 多樣性高（每天約 2 萬個不重複商品頁），理論上限約 21%，調整 TTL 無法改善；低於 {rules.cacheHitRateWarnPct}% 才代表 cache 失效異常
 - {rollout.startDate} 為本階段（{rollout.phase}）切換日，當天流量為前後兩個階段混合，數據不具代表性，**不計入觀測達標日**
 
 ---
