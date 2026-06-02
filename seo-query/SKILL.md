@@ -99,7 +99,7 @@ Sheet 每列代表一個指標，欄位結構如下：
 - `COMBINED_FOLDER_ID` ← `drive.combinedFolderId`
 - `GSC_SHEET_ID` ← `gscSheet.spreadsheetId`
 - `GSC_SHEET_NAME` ← `gscSheet.sheetName`（需 URL encode，空格轉 `%20`；若含特殊字元建議整體 encode）
-- `{rollout.phase}`、`{rollout.guidSuffix}`、`{rollout.trafficPercent}` ← 放量階段資訊，用於背景知識說明
+- `{rollout.phase}`、`{rollout.guidSuffix}`、`{rollout.trafficPercent}`、`{rollout.startDate}` ← 放量階段資訊，用於背景知識說明
 - `{rules.p95WarnMs}`、`{rules.p99WarnMs}`、`{rules.above5sAbnormalPct}`、`{rules.above3to5sWarnPct}` ← 異常判斷門檻
 - `{rules.p95BaselineMs}`、`{rules.p99BaselineMs}` ← 升階條件用 baseline（升階門檻 = baseline × 1.2）；與達標日判斷無關，達標日依 Worker 請求數與峰值 RPM 判定
 
@@ -187,6 +187,7 @@ GSC Tracking Sheet 已在 Step 2 直接取得，無需額外下載。
 - `gcloud auth print-access-token` 取得的 token 有效期約 1 小時，過期需重新執行
 - render_time_stats 只涵蓋 cache miss（進入 Worker）的請求，非全部流量
 - cache hit rate 偏低在放量階段為預期行為，不代表異常
+- {rollout.startDate} 為本階段（{rollout.phase}）切換日，當天流量為前後兩個階段混合，數據不具代表性，**不計入觀測達標日**
 
 ---
 

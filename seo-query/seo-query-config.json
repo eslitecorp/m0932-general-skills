@@ -16,7 +16,8 @@
   "rollout": {
     "phase": "P1",
     "guidSuffix": "12–19",
-    "trafficPercent": 8
+    "trafficPercent": 8,
+    "startDate": "2026/06/02"
   },
   "drive": {
     "ssrFolderId": "1iXSr0Oc4lEJnSScPMSplI2z9bUNyGpVR",
