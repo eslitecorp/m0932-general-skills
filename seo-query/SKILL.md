@@ -29,7 +29,7 @@ render_time_stats 只涵蓋 cache miss 的請求。
 - `render_time_stats.count_above_3000to5000ms / render_time_stats.total_records` > {rules.above3to5sWarnPct}% → ⚠️ 警告（3–5秒）
 
 **Cache Hit Rate**（cache_hits / 總請求數）
-- < {rules.cacheHitRateWarnPct}% → ⚠️ 警告（P0 放量階段基準約 7–9%）
+- < {rules.cacheHitRateWarnPct}% → ⚠️ 警告（P1 放量階段基準約 7–9%）
 - < {rules.cacheHitRateAbnormalPct}% → 🚨 異常
 
 **404 Rate**（404 次數 / SSR miss 總數）
@@ -101,6 +101,7 @@ Sheet 每列代表一個指標，欄位結構如下：
 - `GSC_SHEET_NAME` ← `gscSheet.sheetName`（需 URL encode，空格轉 `%20`；若含特殊字元建議整體 encode）
 - `{rollout.phase}`、`{rollout.guidSuffix}`、`{rollout.trafficPercent}` ← 放量階段資訊，用於背景知識說明
 - `{rules.p95WarnMs}`、`{rules.p99WarnMs}`、`{rules.above5sAbnormalPct}`、`{rules.above3to5sWarnPct}` ← 異常判斷門檻
+- `{rules.p95BaselineMs}`、`{rules.p99BaselineMs}` ← 升階條件用 baseline（升階門檻 = baseline × 1.2）；與達標日判斷無關，達標日依 Worker 請求數與峰值 RPM 判定
 
 ### Step 1：決定查詢日期
 
@@ -124,6 +125,16 @@ curl -s "https://sheets.googleapis.com/v4/spreadsheets/${GSC_SHEET_ID}/values/${
 ```
 
 兩個 Drive 資料夾都需要查：SSR 檔取 render time，Combined 檔取 cache hit rate 和 404 數據。
+GSC Tracking Sheet 取全站 GSC 週期指標（曝光、點擊、CTR、排名、覆蓋率等）。
+
+**Combined 檔重要欄位對應：**
+- Cache hit rate：`cloudflare_cache_hit.total_ssr_hits`（cache hits）／`data_source_stats.ssr_records`（Worker 請求數）
+- 404 總數：`errors_404.total_404_count`
+- Worker 請求數：`data_source_stats.ssr_records`
+
+**無法從 JSON 取得的指標（需人工從 Cloudflare Dashboard 確認）：**
+- HTTP 5xx rate：JSON 分析檔不含 HTTP status code breakdown
+- Astro 200 率：同上；404 為下架商品正常回應，計算時應排除
 GSC Tracking Sheet 取全站 GSC 週期指標（曝光、點擊、CTR、排名、覆蓋率等）。
 
 ### Step 3：下載 JSON 資料
