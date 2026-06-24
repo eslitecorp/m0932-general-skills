@@ -2,8 +2,8 @@
   "rules": {
     "p95WarnMs": 3000,
     "p99WarnMs": 5000,
-    "p95BaselineMs": 2884,
-    "p99BaselineMs": 3878,
+    "p95BaselineMs": 2224,
+    "p99BaselineMs": 3542,
     "above5sAbnormalPct": 1,
     "above3to5sWarnPct": 3,
     "cacheHitRateWarnPct": 5,
@@ -14,10 +14,10 @@
     "error404AbnormalPct": 15
   },
   "rollout": {
-    "phase": "P1",
-    "guidSuffix": "12–19",
-    "trafficPercent": 8,
-    "startDate": "2026/06/02"
+    "phase": "P2",
+    "guidSuffix": "10–21",
+    "trafficPercent": 12,
+    "startDate": "2026/06/22"
   },
   "drive": {
     "ssrFolderId": "1iXSr0Oc4lEJnSScPMSplI2z9bUNyGpVR",
