@@ -20,8 +20,9 @@
     "startDate": "2026/06/30"
   },
   "drive": {
-    "ssrFolderId": "1iXSr0Oc4lEJnSScPMSplI2z9bUNyGpVR",
-    "combinedFolderId": "1w089WQQpTFmkRtLN6jwPE7nFpUzhL2Pi"
+    "product": { "label": "商品頁", "folderId": "1MmLWR2m0MtuQ4v13o82HBvcm0XT5cPuJ" },
+    "category": { "label": "分類頁", "folderId": "145MJEd9TnIO22GAEnQtbfKGCRvRHwcmv" },
+    "combined": { "label": "Combined", "folderId": "1w089WQQpTFmkRtLN6jwPE7nFpUzhL2Pi" }
   },
   "gscSheet": {
     "spreadsheetId": "1XKaRKwchznWq3CKYLGo8TRPW4QZ3dEqBLEZSk1G_rRQ",
