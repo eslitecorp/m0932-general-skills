@@ -104,7 +104,7 @@ Sheet 每列代表一個指標，欄位結構如下：
 - `GSC_SHEET_NAME` ← `gscSheet.sheetName`（需 URL encode，空格轉 `%20`；若含特殊字元建議整體 encode）
 - `{rollout.phase}`、`{rollout.guidSuffix}`、`{rollout.trafficPercent}`、`{rollout.startDate}` ← 放量階段資訊，用於背景知識說明
 - `{rules.p95WarnMs}`、`{rules.p99WarnMs}`、`{rules.above5sAbnormalPct}`、`{rules.above3to5sWarnPct}` ← 異常判斷門檻
-- `{rules.p95BaselineMs}`、`{rules.p99BaselineMs}` ← 升階條件用 baseline（升階門檻 = baseline × 1.2）；與達標日判斷無關，達標日依 Worker 請求數與峰值 RPM 判定
+- `{rules.p95BaselineMs}`、`{rules.p99BaselineMs}` ← 升階條件用 baseline（升階門檻 = baseline × 1.2）；與達標日判斷無關，達標日依 `qualifying_day.page_kind`（目前為商品頁）的 Worker 請求數與峰值 RPM 判定，非 combined 加總值
 
 ### Step 1：決定查詢日期
 
