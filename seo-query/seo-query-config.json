@@ -2,8 +2,8 @@
   "rules": {
     "p95WarnMs": 3000,
     "p99WarnMs": 5000,
-    "p95BaselineMs": 2286,
-    "p99BaselineMs": 3745,
+    "p95BaselineMs": 2502,
+    "p99BaselineMs": 4228,
     "above5sAbnormalPct": 1,
     "above3to5sWarnPct": 3,
     "cacheHitRateWarnPct": 5,
@@ -14,10 +14,10 @@
     "error404AbnormalPct": 15
   },
   "rollout": {
-    "phase": "P3",
-    "guidSuffix": "10–29",
-    "trafficPercent": 20,
-    "startDate": "2026/06/30"
+    "phase": "P4",
+    "guidSuffix": "10–59",
+    "trafficPercent": 50,
+    "startDate": "2026/07/17"
   },
   "drive": {
     "product": { "label": "商品頁", "folderId": "1MmLWR2m0MtuQ4v13o82HBvcm0XT5cPuJ" },
