@@ -1,12 +1,12 @@
 ---
 name: seo-query
-description: "查詢 Eslite 誠品線上 Astro 商品頁 SSR 效能與 SEO 數據，包含 render time 統計、cache hit rate、404 異常率、各 bot 流量分析，以及升階條件評估。觸發語句：「SSR 效能如何」、「查昨天 render time」、「升階條件通過了嗎」、「有達標嗎」、「/seo-query」。"
+description: "查詢 Eslite 誠品線上 Astro 商品頁／分類頁 SSR 效能與 SEO 數據，包含 render time 統計、cache hit rate、404 異常率、各 bot 流量分析，以及升階條件評估。觸發語句：「SSR 效能如何」、「查昨天 render time」、「分類頁效能如何」、「升階條件通過了嗎」、「有達標嗎」、「/seo-query」。"
 tags: ["report", "ai"]
 ---
 
-# SEO Query — 商品頁 SSR 效能查詢
+# SEO Query — 商品頁／分類頁 SSR 效能查詢
 
-查詢 Eslite 誠品線上 Astro 商品頁的 SSR 效能與 SEO 數據，解讀 render time 統計、cache hit rate 與異常率。
+查詢 Eslite 誠品線上 Astro 商品頁、分類頁的 SSR 效能與 SEO 數據，解讀 render time 統計、cache hit rate 與異常率。目前登記的頁面類型：商品頁（product）、分類頁（category），兩者共用同一套異常判斷規則。
 
 ---
 
@@ -16,9 +16,9 @@ SSR 服務只有爬蟲（Googlebot）進入，不影響使用者體驗，但直�
 渲染架構使用 Cloudflare Worker，效能問題方向是優化 API 或 cache 策略，不適用擴容建議。
 目前處於 {rollout.phase} 放量階段（GUID 尾兩位 {rollout.guidSuffix}，約 {rollout.trafficPercent}% 流量），cache hit rate 偏低是預期行為。
 Astro 目前僅處理 ~{rollout.trafficPercent}% 的 Googlebot 流量，SSR 效能問題對整體 GSC 指標影響有限，分析時不應將 GSC 指標波動直接歸因於 Astro。
-ssr_records = 實際打到 Worker 的請求數（cache miss）；cache_hit_ssr = Cloudflare edge 直接回應（未進 Worker）。
-render_time_stats 只涵蓋 cache miss 的請求。
-商品價格與庫存由 client-side 非同步載入，不在 SSR 範疇。
+combined json 裡的 `{kind}_records`（`product_records`/`category_records`）= 實際打到 Worker 的請求數（cache miss）；`cache_hit_{kind}` = Cloudflare edge 直接回應（未進 Worker）。
+render_time_stats 只涵蓋 cache miss 的請求，商品頁、分類頁的 SSR json 欄位結構相同。
+商品頁價格與庫存由 client-side 非同步載入，不在 SSR 範疇；分類頁沒有 SSG，只有 SSR。
 
 ## 異常判斷規則
 
@@ -44,7 +44,7 @@ render_time_stats 只涵蓋 cache miss 的請求。
 
 所有 ID 與設定值集中於 `seo-query/seo-query-config.json`，需要時直接修改該檔即可。
 
-檔名格式：`ssr-product-log-YYYYMMDD_analysis.json` / `combined-YYYYMMDD_analysis.json`
+檔名格式：`ssr-product-log-YYYYMMDD_analysis.json`（商品頁）／`category-page-log-YYYYMMDD_analysis.json`（分類頁）／`combined-YYYYMMDD_analysis.json`
 
 ---
 
@@ -97,13 +97,14 @@ Sheet 每列代表一個指標，欄位結構如下：
 ### Step 0：讀取設定檔
 
 讀取 `seo-query/seo-query-config.json`，取得以下變數供後續步驟使用：
-- `SSR_FOLDER_ID` ← `drive.ssrFolderId`
-- `COMBINED_FOLDER_ID` ← `drive.combinedFolderId`
+- `PRODUCT_FOLDER_ID` ← `drive.product.folderId`
+- `CATEGORY_FOLDER_ID` ← `drive.category.folderId`
+- `COMBINED_FOLDER_ID` ← `drive.combined.folderId`
 - `GSC_SHEET_ID` ← `gscSheet.spreadsheetId`
 - `GSC_SHEET_NAME` ← `gscSheet.sheetName`（需 URL encode，空格轉 `%20`；若含特殊字元建議整體 encode）
 - `{rollout.phase}`、`{rollout.guidSuffix}`、`{rollout.trafficPercent}`、`{rollout.startDate}` ← 放量階段資訊，用於背景知識說明
 - `{rules.p95WarnMs}`、`{rules.p99WarnMs}`、`{rules.above5sAbnormalPct}`、`{rules.above3to5sWarnPct}` ← 異常判斷門檻
-- `{rules.p95BaselineMs}`、`{rules.p99BaselineMs}` ← 升階條件用 baseline（升階門檻 = baseline × 1.2）；與達標日判斷無關，達標日依 Worker 請求數與峰值 RPM 判定
+- `{rules.p95BaselineMs}`、`{rules.p99BaselineMs}` ← 升階條件用 baseline（升階門檻 = baseline × 1.2）；與達標日判斷無關，達標日依 `qualifying_day.page_kind`（目前為商品頁）的 Worker 請求數與峰值 RPM 判定，非 combined 加總值
 
 ### Step 1：決定查詢日期
 
@@ -113,8 +114,11 @@ Sheet 每列代表一個指標，欄位結構如下：
 
 ```bash
 TOKEN=$(gcloud auth print-access-token)
-# SSR 資料夾（使用 SSR_FOLDER_ID）
-curl -s "https://www.googleapis.com/drive/v3/files?q='${SSR_FOLDER_ID}'+in+parents+and+name+contains+'YYYYMMDD'&fields=files(id,name)" \
+# 商品頁 SSR 資料夾（使用 PRODUCT_FOLDER_ID）
+curl -s "https://www.googleapis.com/drive/v3/files?q='${PRODUCT_FOLDER_ID}'+in+parents+and+name+contains+'YYYYMMDD'&fields=files(id,name)" \
+  -H "Authorization: Bearer $TOKEN"
+# 分類頁 SSR 資料夾（使用 CATEGORY_FOLDER_ID，若為 null 則跳過）
+curl -s "https://www.googleapis.com/drive/v3/files?q='${CATEGORY_FOLDER_ID}'+in+parents+and+name+contains+'YYYYMMDD'&fields=files(id,name)" \
   -H "Authorization: Bearer $TOKEN"
 # Combined 資料夾（使用 COMBINED_FOLDER_ID）
 curl -s "https://www.googleapis.com/drive/v3/files?q='${COMBINED_FOLDER_ID}'+in+parents+and+name+contains+'YYYYMMDD'&fields=files(id,name)" \
@@ -126,13 +130,14 @@ curl -s "https://sheets.googleapis.com/v4/spreadsheets/${GSC_SHEET_ID}/values/${
   -H "Authorization: Bearer $TOKEN"
 ```
 
-兩個 Drive 資料夾都需要查：SSR 檔取 render time，Combined 檔取 cache hit rate 和 404 數據。
-GSC Tracking Sheet 取全站 GSC 週期指標（曝光、點擊、CTR、排名、覆蓋率等）。
+每個有效的 Drive 資料夾都需要查：商品頁／分類頁 SSR 檔取 render time，Combined 檔取 cache hit rate 和 404 數據。
 
 **Combined 檔重要欄位對應：**
-- Cache hit rate：`cloudflare_cache_hit.total_ssr_hits`（cache hits）／`data_source_stats.ssr_records`（Worker 請求數）
-- 404 總數：`errors_404.total_404_count`
-- Worker 請求數：`data_source_stats.ssr_records`
+- 商品頁 cache hit rate：`cloudflare_cache_hit.total_ssr_hits`（cache hits）／`data_source_stats.ssr_records`（Worker 請求數）
+- 商品頁 404 總數：`errors_404.total_404_count`
+- 分類頁 cache hit rate：`cloudflare_cache_hit_category.total_ssr_hits`（cache hits）／`data_source_stats.category_records`（Worker 請求數）
+- 分類頁 404 總數：`errors_404_category.total_404_count`
+- Worker 請求數：`data_source_stats.ssr_records`（商品頁）／`data_source_stats.category_records`（分類頁）
 
 **無法從 JSON 取得的指標（需人工從 Cloudflare Dashboard 確認）：**
 - HTTP 5xx rate：JSON 分析檔不含 HTTP status code breakdown
@@ -141,7 +146,7 @@ GSC Tracking Sheet 取全站 GSC 週期指標（曝光、點擊、CTR、排名�
 
 ### Step 3：下載 JSON 資料
 
-取得 file ID 後下載內容（SSR 和 Combined 各下載第一筆）：
+取得 file ID 後下載內容（商品頁 SSR、分類頁 SSR、Combined 各下載第一筆）：
 
 ```bash
 curl -s "https://www.googleapis.com/drive/v3/files/FILE_ID?alt=media" \
@@ -158,7 +163,7 @@ GSC Tracking Sheet 已在 Step 2 直接取得，無需額外下載。
 
 **輸出格式：**
 
-1. **SSR 效能** — 用表格呈現，欄位：指標 / 數值 / 狀態
+1. **商品頁 SSR 效能** — 用表格呈現，欄位：指標 / 數值 / 狀態
    ```
    | 指標      | 數值     | 狀態 |
    |-----------|---------|------|
@@ -168,13 +173,15 @@ GSC Tracking Sheet 已在 Step 2 直接取得，無需額外下載。
    | 3–5秒率   | 0.94%   | ✅   |
    ```
 
-2. **Cache Hit Rate** — 單行數值 + 狀態符號
+2. **分類頁 SSR 效能**（若問題涉及分類頁，或使用者同時詢問兩種頁面）— 同上表格格式，門檻與商品頁共用同一套規則
 
-3. **404 Rate** — 單行數值 + 狀態符號 + 括號標示與 SEO 目標 {rules.error404HealthyPct}% 的落差
+3. **Cache Hit Rate** — 商品頁、分類頁各一行數值 + 狀態符號（只問其中一種頁面時只輸出該項）
 
-4. **GSC 指標**（若問題涉及）— 條列重點指標的週變化，標注 ✅ / ⚠️ / 🚨
+4. **404 Rate** — 商品頁、分類頁各一行數值 + 狀態符號 + 括號標示與 SEO 目標 {rules.error404HealthyPct}% 的落差
 
-5. **結尾固定格式：**
+5. **GSC 指標**（若問題涉及）— 條列重點指標的週變化，標注 ✅ / ⚠️ / 🚨
+
+6. **結尾固定格式：**
    ```
    ⚠️ 以上為 AI 建議，請工程師判斷後再行動。
    ```
