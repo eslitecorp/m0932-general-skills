@@ -28,7 +28,7 @@
 
 | Skill | 說明 |
 | --- | --- |
-| [agentic-workflow-diagnosis](agentic-workflow-diagnosis/) | 從 session 紀錄診斷 agentic 工作流程的行為不當並給出調整方法；行為與環境調整窮盡後才評估硬體缺口 |
+| [agentic-workflow-diagnosis](agentic-workflow-diagnosis/) | 掃 session 紀錄診斷 agent 卡頓與記憶體不足的成因，產出使用方法的調整建議，窮盡後才評估硬體需求 |
 
 ### 監控 / Observability
 
