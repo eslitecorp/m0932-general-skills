@@ -1,5 +1,5 @@
 {
-  "_comment": "管理 skill 同步的 target repo 清單。新增 target 只要在此加一筆，sync workflow 會自動處理。",
+  "_comment": "管理 skill 同步的 target repo 清單。⚠️ 尚未生效：目前 repo 內沒有任何程式讀取本檔（.github/workflows/ 只有 ci.yml），因此填寫 targets 或設定 enabled:true 都不會觸發同步。要啟用需另外實作 sync workflow 並配置具跨 repo 寫入權的 token secret。本檔先保留供屆時使用。",
   "targets": [
     {
       "platform": "github",
