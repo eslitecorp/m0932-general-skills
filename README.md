@@ -24,6 +24,12 @@
 | --- | --- |
 | [youtrack-report](youtrack-report/) | 連線 YouTrack 自動產生包含上週完成與未完成事項的 Markdown 週報 |
 
+### 資源 / 工作流程診斷
+
+| Skill | 說明 |
+| --- | --- |
+| [agentic-workflow-diagnosis](agentic-workflow-diagnosis/) | 從 session 紀錄診斷 agentic 工作流程的行為不當並給出調整方法；行為與環境調整窮盡後才評估硬體缺口 |
+
 ### 監控 / Observability
 
 | Skill | 說明 |
