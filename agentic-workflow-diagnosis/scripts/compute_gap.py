@@ -108,9 +108,26 @@ def baseline(decl: dict, meas: dict) -> dict:
                              "mb": a.get("footprint_mb", UNKNOWN)})
             continue
         layer = a.get("layer")
+        ws = d.get("working_set_mb")
         if layer != "L4":
+            # 宣告工作集：整項落 L2 但其中有一部分是工作真的需要的。
+            # ⛔ 這不是把 L2 洗成 L4 —— 它只讓宣告的那一段進入候選集，
+            #    是不是真的不可壓縮仍由 G2 的降載實驗決定。超出的部分照樣是 L2。
+            fp = a.get("footprint_mb")
+            if (layer == "L2" and isinstance(ws, (int, float)) and ws > 0
+                    and isinstance(fp, (int, float))):
+                take = min(ws, fp)
+                counted.append({"name": name, "mb": round(take, 1),
+                                "note": f"宣告工作集 {ws} MB（實測 {fp} MB，"
+                                        f"超出的 {round(fp - take, 1)} MB 仍為 L2）"})
+                if fp > take:
+                    excluded.append({"name": f"{name}（超出工作集的部分）",
+                                     "reason": "超過宣告工作集 → 仍為 L2，回第一層處理",
+                                     "mb": round(fp - take, 1)})
+                continue
             excluded.append({"name": name,
-                             "reason": f"宣告了但實測落在 {layer or UNKNOWN} 不是 L4 → 不計入",
+                             "reason": f"宣告了但實測落在 {layer or UNKNOWN} 不是 L4 → 不計入"
+                                       + ("" if ws else "（未宣告工作集）"),
                              "mb": a.get("footprint_mb", UNKNOWN)})
             continue
 
@@ -284,7 +301,7 @@ def gate_g2(bl: dict, r: dict, meas: dict) -> dict:
     return {"status": PASS, "reason": "缺口有降載實測支撐", "notes": notes}
 
 
-def gate_g3(decl: dict, meas: dict) -> dict:
+def gate_g3(decl: dict, meas: dict, baseline_mb=None) -> dict:
     """G3 替代已證否。可事後升級、共享替代可行、階梯未證否，都不過。"""
     problems = []
     m = decl.get("machine") or {}
@@ -306,15 +323,51 @@ def gate_g3(decl: dict, meas: dict) -> dict:
                             f"{sorted(SHARED_ALT_REASONS)}")
 
     ladder = meas.get("spec_ladder")
+    notes = []
     if not isinstance(ladder, dict):
-        problems.append("沒有規格階梯證否")
+        problems.append("沒有規格階梯（證否式或宣告式擇一，不得留空）")
     else:
-        if ladder.get("next_cheaper_insufficient") is not True:
-            problems.append("規格階梯只證明本案規格夠，未證明「下一階較便宜的規格不足」")
-        if not (ladder.get("evidence") or "").strip():
-            problems.append("規格階梯證否沒有附證據")
+        policy = ladder.get("policy", "disproof")
+        if policy == "disproof":
+            if ladder.get("next_cheaper_insufficient") is not True:
+                problems.append("規格階梯只證明本案規格夠，未證明「下一階較便宜的規格不足」")
+            if not (ladder.get("evidence") or "").strip():
+                problems.append("規格階梯證否沒有附證據")
+        elif policy == "declared_headroom":
+            # ⚠️ 宣告式：以「覆蓋應然基線的那一階，再加一階」定機型。
+            #    比證否式寬鬆 —— 它不要求證明下一階不足，而是明白地買餘裕。
+            #    唯一的硬要求是**錨點必須是應然基線不是現值**。
+            tiers = ladder.get("tiers_gb")
+            anchor = ladder.get("anchor_mb")
+            rec = ladder.get("recommended_gb")
+            above = ladder.get("tiers_above", 1)
+            if not (isinstance(tiers, list) and tiers):
+                problems.append("宣告式階梯要列出可選規格階（tiers_gb）")
+            elif not isinstance(anchor, (int, float)):
+                problems.append("宣告式階梯要給錨點（anchor_mb）")
+            elif abs(anchor - baseline_mb) > 1:
+                problems.append(
+                    f"⛔ 錨點 {anchor} MB 不等於應然基線 {baseline_mb} MB。"
+                    "標準明訂不得以現值當需求基準 —— 現值可能已經含該被刪掉的浪費")
+            else:
+                cover = next((t for t in sorted(tiers) if anchor / 1024.0 <= t),
+                             sorted(tiers)[-1])
+                idx = sorted(tiers).index(cover)
+                expect = sorted(tiers)[min(idx + above, len(tiers) - 1)]
+                if rec != expect:
+                    problems.append(f"宣告式階梯：錨點 {anchor / 1024:.1f} GB 的覆蓋階是 "
+                                    f"{cover} GB，加 {above} 階應為 {expect} GB，"
+                                    f"但建議寫 {rec} GB")
+                else:
+                    notes.append(f"宣告式階梯：錨點 {anchor / 1024:.1f} GB → 覆蓋階 "
+                                 f"{cover} GB → 加 {above} 階 → 建議 {expect} GB。"
+                                 "⚠️ 這是宣告的餘裕政策，不是證否 —— "
+                                 "審查文件要寫明它比證否式寬鬆")
+        else:
+            problems.append(f"未知的規格階梯政策「{policy}」"
+                            "（只接受 disproof 或 declared_headroom）")
 
-    return ({"status": PASS, "reason": "替代已證否"} if not problems
+    return ({"status": PASS, "reason": "替代已證否", "notes": notes} if not problems
             else {"status": FAIL, "verdict": "不受理", "problems": problems})
 
 
@@ -324,7 +377,7 @@ def evaluate(decl: dict, meas: dict) -> dict:
     bl = baseline(decl, meas)
     r = ratios(decl, meas, bl["baseline_mb"])
     g = {"G0": gate_g0(meas), "G1": gate_g1(meas),
-         "G2": gate_g2(bl, r, meas), "G3": gate_g3(decl, meas)}
+         "G2": gate_g2(bl, r, meas), "G3": gate_g3(decl, meas, bl["baseline_mb"])}
 
     order = ["G0", "G1", "G2", "G3"]
     stopped_at, verdict = None, None

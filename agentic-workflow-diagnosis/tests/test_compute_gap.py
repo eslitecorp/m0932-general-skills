@@ -246,6 +246,93 @@ class TestG0RevisionThree(unittest.TestCase):
         self.assertEqual(g["compute_evidence_present"], [])
 
 
+class TestWorkingSetDeclaration(unittest.TestCase):
+    """
+    修訂 3：宣告工作集 —— 整項落 L2 但其中一段是工作真的需要的。
+
+    ⛔ 這不是把 L2 洗成 L4。護欄有三層：要有 observation、只計宣告的那一段、
+       而且是不是真的不可壓縮仍由 G2 的降載實驗決定。
+    """
+
+    def _l2_case(self, ws):
+        d = decl()
+        d["incompressible"] = [{"name": "browser", "scales_with_concurrency": False,
+                                "working_set_mb": ws,
+                                "observation": "當下使用證據：45 個 process，取樣期間有 CPU 活動",
+                                "shared_alternative_reason": "延遲不可容忍"}]
+        m = meas(attribution=[{"name": "browser", "layer": "L2", "footprint_mb": 9571}])
+        return cg.baseline(d, m)
+
+    def test_declared_working_set_counts_only_the_declared_part(self):
+        bl = self._l2_case(4000)
+        self.assertEqual(bl["baseline_mb"], 4000.0)
+        self.assertTrue(any("超出工作集" in e["name"] for e in bl["excluded"]))
+        self.assertTrue(any(e.get("mb") == 5571.0 for e in bl["excluded"]))
+
+    def test_working_set_cannot_exceed_measured(self):
+        """宣告比實測大時以實測為準 —— ⛔ 宣告不能創造不存在的量。"""
+        self.assertEqual(self._l2_case(99999)["baseline_mb"], 9571.0)
+
+    def test_l2_without_working_set_is_still_excluded(self):
+        """沒宣告工作集的 L2 照樣整項排除，並指名原因。"""
+        d = decl()
+        d["incompressible"] = [{"name": "browser", "observation": "有在用",
+                                "shared_alternative_reason": "延遲不可容忍"}]
+        m = meas(attribution=[{"name": "browser", "layer": "L2", "footprint_mb": 9571}])
+        bl = cg.baseline(d, m)
+        self.assertTrue(bl["intersection_empty"])
+        self.assertIn("未宣告工作集", bl["excluded"][0]["reason"])
+
+    def test_working_set_still_needs_observation(self):
+        """⛔ 工作集不能繞過 observation 這道門。"""
+        d = decl()
+        d["incompressible"] = [{"name": "browser", "working_set_mb": 4000,
+                                "observation": "", "shared_alternative_reason": "延遲不可容忍"}]
+        m = meas(attribution=[{"name": "browser", "layer": "L2", "footprint_mb": 9571}])
+        self.assertTrue(cg.baseline(d, m)["intersection_empty"])
+
+
+class TestSpecLadderPolicies(unittest.TestCase):
+    """修訂 3：規格階梯的兩種政策。宣告式比證否式寬鬆，錨點必須是應然基線。"""
+
+    LADDER = [16, 24, 36, 48, 64, 128]
+
+    def _headroom(self, anchor_mb, rec_gb, baseline_mb=None):
+        m = meas(spec_ladder={"policy": "declared_headroom", "tiers_gb": self.LADDER,
+                              "anchor_mb": anchor_mb, "recommended_gb": rec_gb,
+                              "tiers_above": 1})
+        return cg.gate_g3(decl(), m,
+                          baseline_mb if baseline_mb is not None else anchor_mb)
+
+    def test_headroom_policy_accepts_cover_plus_one(self):
+        """錨點 19.8 GB → 覆蓋階 24 → +1 → 36。"""
+        g = self._headroom(20275, 36)
+        self.assertEqual(g["status"], cg.PASS)
+        self.assertTrue(any("36 GB" in n for n in g["notes"]))
+
+    def test_headroom_policy_rejects_wrong_tier(self):
+        """錨點 19.8 GB 卻寫 48 → 不受理（+1 階是 36，不是 +2）。"""
+        self.assertEqual(self._headroom(20275, 48)["status"], cg.FAIL)
+
+    def test_headroom_anchor_must_be_the_baseline_not_current_usage(self):
+        """
+        ⛔ 核心護欄：錨點不得用現值。
+        現值 27.8 GB 會推到 48 GB，但應然基線是 19.8 GB —— 標準明訂
+        「不得以現值作為需求基準，現值可能已經包含該被刪掉的浪費」。
+        """
+        g = self._headroom(28467, 48, baseline_mb=20275)
+        self.assertEqual(g["status"], cg.FAIL)
+        self.assertTrue(any("不得以現值當需求基準" in p for p in g["problems"]))
+
+    def test_disproof_policy_still_works_and_is_the_default(self):
+        g = cg.gate_g3(decl(), meas(), 400)
+        self.assertEqual(g["status"], cg.PASS)
+
+    def test_unknown_policy_is_rejected(self):
+        m = meas(spec_ladder={"policy": "我覺得應該買大一點", "tiers_gb": self.LADDER})
+        self.assertEqual(cg.gate_g3(decl(), m, 400)["status"], cg.FAIL)
+
+
 class TestG1Exhaustion(unittest.TestCase):
     def test_claim_without_before_after_fails(self):
         """⛔ 只有宣稱沒有前→後 → 不受理，退回該層。"""
