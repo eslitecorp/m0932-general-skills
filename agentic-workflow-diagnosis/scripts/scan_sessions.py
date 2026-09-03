@@ -321,14 +321,56 @@ def resolve_session_id(explicit: str | None) -> tuple[str | None, str]:
        **靜默無作用** —— 診斷用的 session 汙染了自己的統計，而且沒有任何提示。
        這是 environment.md「陷阱四：失敗時可能靜默回 0」的同型錯誤。
        本函式解不出來時回 (None, "")，由呼叫端**大聲失敗**，不得默默略過。
+
+    ⛔ 加變數名不是修法的全部（第 15 類失效）。v0.2 的清單缺 CLAUDE_CODE_SESSION_ID，
+       而在某機那才是命名 jsonl 檔、也出現在每筆記錄 sessionId 欄的那一個；同機的
+       CLAUDE_CODE_HOST_SESSION_ID 帶 "local_" 前綴，對不上任何 jsonl。結果是
+       **解得出來但解錯** —— session_id_resolved 為 true、loud-fail 不觸發，
+       排除卻是 no-op。「再多加一個變數名」與 A1（索引白名單寫死 server 名稱）
+       是同一種病，下一台機器換個名字就再犯。
+       通用修法是 session_id_in_corpus()：解出來的 id 要對著語料驗證。
     """
     if explicit:
         return explicit, "--session-id"
-    for key in ("CLAUDE_SESSION_ID", "CLAUDE_CODE_HOST_SESSION_ID"):
+    for key in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID",
+                "CLAUDE_CODE_HOST_SESSION_ID"):
         val = os.environ.get(key)
         if val:
             return val, key
     return None, ""
+
+
+def session_id_in_corpus(root: Path, sid: str) -> bool | None:
+    """
+    確認 sid 真的指向語料裡的某個 session。回傳 True / False / None（語料為空 → UNKNOWN）。
+
+    ⛔ 這是第 15 類失效的通用修法，不要拿掉。
+       「解到一個語料裡不存在的 id」與「解不出來」在後果上完全相同（排除沒發生），
+       所以處置也必須相同 —— 大聲失敗。本函式不需要知道任何環境變數名，
+       因此換一台機器、換一套 id 命名規則都仍然成立。
+
+    先比對檔名（便宜），對不上才逐檔讀首筆記錄的 sessionId（有些語料的檔名與 id 不同構）。
+    """
+    files = sorted(root.rglob("*.jsonl"))
+    if not files:
+        return None
+    if any(p.stem == sid for p in files):
+        return True
+    for p in files:
+        try:
+            with p.open(encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(rec, dict) and rec.get("sessionId"):
+                        if rec["sessionId"] == sid:
+                            return True
+                        break        # 同一檔的 sessionId 一致，看首筆即可
+        except OSError:
+            continue
+    return False
 
 
 # --- 工具函式 --------------------------------------------------------------
@@ -896,6 +938,10 @@ def build_host_context(root: Path, extra_roots, explicit_sid) -> dict:
     sid, sid_source = resolve_session_id(explicit_sid)
     repo_roots = discover_repo_roots(root, extra_roots)
 
+    # ⛔ 解出來不等於解對。第 15 類失效就是 resolved=True 但 id 對不上語料，
+    #    於是排除靜默失效而 loud-fail 不觸發。這一欄讓第零層看得見這件事。
+    matches = session_id_in_corpus(root, sid) if sid else None
+
     return {
         "projects_root": str(root),
         "index_patterns": patterns,
@@ -903,6 +949,7 @@ def build_host_context(root: Path, extra_roots, explicit_sid) -> dict:
         "index_servers_configured": index_servers,
         "session_id_resolved": bool(sid),
         "session_id_source": sid_source or "UNRESOLVED",
+        "session_id_matches_corpus": "UNKNOWN" if matches is None else matches,
         "repo_roots_found": repo_roots,
         "platform": sys.platform,
     }
@@ -926,6 +973,16 @@ def render_preflight(host: dict) -> str:
     if not host["session_id_resolved"]:
         a("                ⚠️ 解不出來 → --exclude-current 無法生效，")
         a("                   掃描行為會汙染自己的統計。請改用 --session-id。")
+    else:
+        m = host.get("session_id_matches_corpus")
+        if m is True:
+            a("                對得上語料 → --exclude-current 會真的生效")
+        elif m is False:
+            a("                🔴 解得出來但**對不上語料裡任何 session**")
+            a("                   → --exclude-current 會靜默無作用（第 15 類失效）。")
+            a("                   請用 --session-id 明給正確的 id。")
+        else:
+            a("                UNKNOWN：語料為空，無法驗證這個 id")
     roots = host["repo_roots_found"]
     a(f"repo roots      {len(roots)} 個")
     for r in roots[:10]:
@@ -945,7 +1002,8 @@ def main():
     ap.add_argument("--exclude-current", action="store_true",
                     help="排除當前 session（避免掃描行為自己汙染統計）")
     ap.add_argument("--session-id", default=None,
-                    help="明確指定當前 session id（環境變數解不出來時的逃生門）")
+                    help="明確指定當前 session id（環境變數解不出來或解錯時的逃生門）。"
+                         "單獨給定即視同 --exclude-current")
     ap.add_argument("--repo-root", action="append", default=[],
                     help="額外的 git repo 根目錄，可重複指定")
     args = ap.parse_args()
@@ -962,19 +1020,39 @@ def main():
         return
 
     exclude = set()
-    if args.exclude_current:
+    # ⛔ D3：--session-id 單獨給定時也要生效。v0.2 只在 --exclude-current 同時給定時
+    #    才讀它，於是「只給 --session-id」無聲失效 —— 那個旗標唯一的用途就是排除。
+    if args.exclude_current or args.session_id:
         # ⛔ 大聲失敗。v0.1 在這裡解不出 id 就默默跳過，結果是旗標看似生效、
         #    實際沒作用，掃描用的 session 汙染了自己的統計而沒有任何提示。
         sid, source = resolve_session_id(args.session_id)
         if not sid:
             sys.exit(
                 "[ERROR] --exclude-current 需要當前 session id，但解不出來。\n"
-                "        已嘗試：--session-id、$CLAUDE_SESSION_ID、$CLAUDE_CODE_HOST_SESSION_ID\n"
+                "        已嘗試：--session-id、$CLAUDE_CODE_SESSION_ID、"
+                "$CLAUDE_SESSION_ID、$CLAUDE_CODE_HOST_SESSION_ID\n"
                 "        請改用 --session-id <id>，或拿掉 --exclude-current 並接受統計含本次掃描。\n"
                 "        （不會靜默略過 —— 靜默略過會讓你以為排除掉了。）"
             )
+        # ⛔ D2／第 15 類失效：解出來不等於解對。id 對不上語料時排除是 no-op，
+        #    後果與「解不出來」完全相同，所以處置也相同 —— 大聲失敗。
+        #    這條檢查不依賴任何環境變數名，換機器仍然成立。
+        matches = session_id_in_corpus(root, sid)
+        if matches is False:
+            sys.exit(
+                f"[ERROR] 解出的 session id 對不上語料裡任何 session。排除不會生效。\n"
+                f"        解到：{sid}\n"
+                f"        來源：{source}\n"
+                f"        語料：{root}\n"
+                "        這是「解得出來但解錯」——後果與解不出來相同（排除沒發生），\n"
+                "        所以同樣大聲失敗，不靜默略過。\n"
+                "        請用 --session-id <正確的 id> 明給；jsonl 的檔名即是 id。"
+            )
         exclude.add(sid)
         host["excluded_session_source"] = source
+        host["excluded_session_matches_corpus"] = (
+            "UNKNOWN（語料為空）" if matches is None else matches
+        )
 
     mains, subs = collect(root, exclude, host["repo_roots_found"], host["index_patterns"])
     if not mains and not subs:

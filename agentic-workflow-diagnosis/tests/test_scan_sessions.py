@@ -144,9 +144,13 @@ class TestIndexDiscovery(TmpCorpus):
 class TestSessionIdResolution(unittest.TestCase):
     """A2：v0.1 只認 CLAUDE_SESSION_ID，別台機器上該變數不存在 → 靜默無作用。"""
 
+    # ⛔ CLAUDE_CODE_SESSION_ID 一定要一起 pop。開發機真的設了它，漏進來的話
+    #    test_fallback_env_var 會拿到那個值而不是 "def"，測試會因為環境而變紅。
+    ENV_KEYS = ("CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID",
+                "CLAUDE_CODE_HOST_SESSION_ID")
+
     def setUp(self):
-        self._saved = {k: os.environ.pop(k, None)
-                       for k in ("CLAUDE_SESSION_ID", "CLAUDE_CODE_HOST_SESSION_ID")}
+        self._saved = {k: os.environ.pop(k, None) for k in self.ENV_KEYS}
 
     def tearDown(self):
         for k, v in self._saved.items():
@@ -174,8 +178,7 @@ class TestSessionIdResolution(unittest.TestCase):
 
     def test_exclude_current_fails_loudly_when_unresolvable(self):
         """⛔ 解不出來必須非 0 退出。靜默略過會讓人以為排除掉了。"""
-        env = {k: v for k, v in os.environ.items()
-               if k not in ("CLAUDE_SESSION_ID", "CLAUDE_CODE_HOST_SESSION_ID")}
+        env = {k: v for k, v in os.environ.items() if k not in self.ENV_KEYS}
         with tempfile.TemporaryDirectory() as tmp:
             write_corpus(Path(tmp), "-repo", "s1", [rec(**tool_use("Read", file_path="/a.py"))])
             out = subprocess.run(
@@ -193,6 +196,111 @@ class TestSessionIdResolution(unittest.TestCase):
             write_corpus(root, "-repo", "drop", [rec(sid="drop", **tool_use("Read", file_path="/b.py"))])
             mains, _ = ss.collect(root, {"drop"}, [], ss.DEFAULT_INDEX_MCP_PATTERNS)
         self.assertEqual([s.session_id for s in mains], ["keep"])
+
+
+# --- 第 15 類：解得出來但解錯 -------------------------------------------------
+
+class TestSessionIdMisresolution(unittest.TestCase):
+    """
+    第 15 類失效（A2 的變體）：id 解得出來但對不上語料，於是 loud-fail 不觸發、
+    排除是 no-op。實測形態：某機 CLAUDE_SESSION_ID 未設定、
+    CLAUDE_CODE_HOST_SESSION_ID = "local_<uuid>"（對不上任何 jsonl），
+    而真正命名 jsonl 的 CLAUDE_CODE_SESSION_ID 當時不在解析清單裡。
+    """
+
+    ENV_KEYS = TestSessionIdResolution.ENV_KEYS
+
+    def setUp(self):
+        self._saved = {k: os.environ.pop(k, None) for k in self.ENV_KEYS}
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            if v is not None:
+                os.environ[k] = v
+            else:
+                os.environ.pop(k, None)
+
+    def test_code_session_id_env_var(self):
+        """D1：CLAUDE_CODE_SESSION_ID 必須在解析清單裡。"""
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "abc"
+        self.assertEqual(
+            ss.resolve_session_id(None), ("abc", "CLAUDE_CODE_SESSION_ID")
+        )
+
+    def test_code_session_id_beats_host_id(self):
+        """D1 的定序：命名 jsonl 的那一個優先於 host 層的 id。"""
+        os.environ["CLAUDE_CODE_SESSION_ID"] = "real"
+        os.environ["CLAUDE_CODE_HOST_SESSION_ID"] = "local_wrong"
+        self.assertEqual(
+            ss.resolve_session_id(None), ("real", "CLAUDE_CODE_SESSION_ID")
+        )
+
+    def test_id_in_corpus_detects_present_and_absent(self):
+        """通用修法本體：不依賴任何環境變數名，只問「這個 id 在語料裡嗎」。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_corpus(root, "-repo", "keep",
+                         [rec(sid="keep", **tool_use("Read", file_path="/a.py"))])
+            self.assertIs(ss.session_id_in_corpus(root, "keep"), True)
+            self.assertIs(ss.session_id_in_corpus(root, "local_zzz"), False)
+        with tempfile.TemporaryDirectory() as empty:
+            # ⛔ 語料為空時是 UNKNOWN，不是 False —— 量不到不等於量到「不存在」。
+            self.assertIsNone(ss.session_id_in_corpus(Path(empty), "keep"))
+
+    def test_resolved_but_absent_id_fails_loudly(self):
+        """
+        ⛔ 第 15 類的回歸測試。解到一個語料裡不存在的 id 時，後果與解不出來相同
+           （排除沒發生），所以必須同樣非 0 退出，不得靜默略過。
+        """
+        env = {k: v for k, v in os.environ.items() if k not in self.ENV_KEYS}
+        env["CLAUDE_CODE_HOST_SESSION_ID"] = "local_zzz"
+        with tempfile.TemporaryDirectory() as tmp:
+            write_corpus(Path(tmp), "-repo", "keep",
+                         [rec(sid="keep", **tool_use("Read", file_path="/a.py"))])
+            out = subprocess.run(
+                [sys.executable, str(SCRIPTS / "scan_sessions.py"),
+                 "--root", tmp, "--exclude-current"],
+                capture_output=True, text=True, env=env,
+            )
+        msg = out.stdout + out.stderr
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("local_zzz", msg)
+        self.assertIn("對不上", msg)
+
+    def test_session_id_alone_implies_exclusion(self):
+        """D3：--session-id 單獨給定時也要生效，不得無聲失效。"""
+        env = {k: v for k, v in os.environ.items() if k not in self.ENV_KEYS}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_corpus(root, "-repo", "keep",
+                         [rec(sid="keep", **tool_use("Read", file_path="/a.py"))])
+            write_corpus(root, "-repo", "drop",
+                         [rec(sid="drop", **tool_use("Read", file_path="/b.py"))])
+            out = subprocess.run(
+                [sys.executable, str(SCRIPTS / "scan_sessions.py"),
+                 "--root", tmp, "--json", "--session-id", "drop"],
+                capture_output=True, text=True, env=env,
+            )
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        r = json.loads(out.stdout)
+        self.assertEqual(r["corpus"]["main_sessions"], 1)
+        self.assertEqual(r["host"]["excluded_session_source"], "--session-id")
+
+    def test_preflight_reports_corpus_match(self):
+        """第零層的必看欄位要看得出這件事 —— 現在那一欄只說 resolved，說不出解對沒有。"""
+        env = {k: v for k, v in os.environ.items() if k not in self.ENV_KEYS}
+        env["CLAUDE_CODE_HOST_SESSION_ID"] = "local_zzz"
+        with tempfile.TemporaryDirectory() as tmp:
+            write_corpus(Path(tmp), "-repo", "keep",
+                         [rec(sid="keep", **tool_use("Read", file_path="/a.py"))])
+            out = subprocess.run(
+                [sys.executable, str(SCRIPTS / "scan_sessions.py"),
+                 "--root", tmp, "--preflight", "--json"],
+                capture_output=True, text=True, env=env,
+            )
+        h = json.loads(out.stdout)
+        self.assertTrue(h["session_id_resolved"])
+        self.assertIs(h["session_id_matches_corpus"], False)
 
 
 # --- B1：repo root 路徑寫死 ------------------------------------------------
