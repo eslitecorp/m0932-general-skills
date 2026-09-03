@@ -2,6 +2,7 @@
 name: agentic-workflow-diagnosis
 description: "agentic 工作環境的盡職調查與行為診斷 skill。從實際 session 紀錄量出探勘繞道率、context 膨脹、subagent 使用率等指標，找出工作流程的行為不當並給出可執行的調整方法；行為與環境調整窮盡後仍不足，才產出硬體缺口的權宜推薦。核心立場：非不得已不花錢了事。觸發語句範例：「agent 跑起來很卡」、「記憶體不夠用」、「要不要升規」、「我的工作流程哪裡有問題」、「硬體申請評估」、「幫我看使用方法對不對」。"
 tags: ["meta", "devops", "monitoring", "ai"]
+issue: "https://github.com/eslitecorp/m0932-general-skills/pull/28"
 ---
 
 # agentic-workflow-diagnosis — agentic 工作環境盡職調查
