@@ -159,6 +159,79 @@ class TestG0Axis(unittest.TestCase):
         self.assertEqual(cg.gate_g0(m)["status"], cg.BLOCKED)
 
 
+class TestG0RevisionOne(unittest.TestCase):
+    """
+    修訂 1（audit-standard.md 第十節）：`inconclusive` 的處置。
+
+    原規則要求「每一個取樣點都四項全 compute」，於是一個落在閒置時刻的取樣點
+    （突發 CPU 消耗者剛結束 → `single_cpu` 為 inconclusive）就把一個明確非記憶體的
+    案子打成「無法歸因」。四種情況現在窮盡且互斥。
+    """
+
+    def test_idle_sample_does_not_rescue_a_compute_bound_case(self):
+        """
+        情況 1：實地形態 —— 三個取樣點、12 個讀數，11 個 compute、0 個 memory，
+        其中一個取樣點的 single_cpu 是 inconclusive。必須判不受理。
+        """
+        s_busy = g0_sample(swapouts="compute", memory_pressure="compute",
+                           ps_vs_pgrep="compute", single_cpu="compute")
+        s_idle = g0_sample(swapouts="compute", memory_pressure="compute",
+                           ps_vs_pgrep="compute", single_cpu="inconclusive")
+        g = cg.gate_g0(meas(g0_samples=[s_busy, s_busy, s_idle]))
+        self.assertEqual(g["status"], cg.FAIL)
+        self.assertEqual(g["verdict"], "不受理")
+
+    def test_all_inconclusive_is_blocked_not_rejected(self):
+        """情況 3：完全沒有成形的訊號 → 停住並要求在有負載的時點重取，不是不受理。"""
+        s = g0_sample(swapouts="inconclusive", memory_pressure="inconclusive",
+                      ps_vs_pgrep="inconclusive", single_cpu="inconclusive")
+        g = cg.gate_g0(meas(g0_samples=[s, s]))
+        self.assertEqual(g["status"], cg.BLOCKED)
+        self.assertIn("重取", g["reason"])
+
+    def test_memory_in_one_sample_compute_in_another_is_blocked(self):
+        """情況 2：跨取樣點的矛盾也算矛盾 —— 不硬判。"""
+        s_mem = g0_sample()
+        s_cpu = g0_sample(swapouts="compute", memory_pressure="compute",
+                          ps_vs_pgrep="compute", single_cpu="compute")
+        g = cg.gate_g0(meas(g0_samples=[s_mem, s_cpu]))
+        self.assertEqual(g["status"], cg.BLOCKED)
+        self.assertIn("矛盾", g["reason"])
+
+    def test_memory_with_inconclusive_still_passes(self):
+        """情況 4：有記憶體證據、無運算證據 → 過。inconclusive 不擋。"""
+        s = g0_sample(single_cpu="inconclusive")
+        g = cg.gate_g0(meas(g0_samples=[s, s]))
+        self.assertEqual(g["status"], cg.PASS)
+
+    def test_revision_does_not_change_verdicts_for_memory_bound_machines(self):
+        """
+        ⛔ 修訂的驗收條件：**不得改變任何既有案子的結論**。
+        有判據指向記憶體的機器走情況 3／4，結果必須與修訂前相同（PASS）。
+        這條測試就是「這不是為了讓某台機器過關而裁剪」的機械證明。
+        """
+        for extra in ({}, {"single_cpu": "inconclusive"},
+                      {"ps_vs_pgrep": "inconclusive", "single_cpu": "inconclusive"}):
+            s = g0_sample(**extra)
+            with self.subTest(extra=extra):
+                self.assertEqual(cg.gate_g0(meas(g0_samples=[s, s]))["status"], cg.PASS)
+
+    def test_revision_only_moves_verdicts_toward_rejection(self):
+        """
+        修訂的方向性：它讓標準**更容易判不受理**，不是更容易受理。
+        原規則會把「無記憶體證據＋部分 inconclusive」判成 BLOCKED；
+        新規則判 FAIL。⛔ 沒有任何輸入從 FAIL／BLOCKED 變成 PASS。
+        """
+        s_busy = g0_sample(swapouts="compute", memory_pressure="compute",
+                           ps_vs_pgrep="compute", single_cpu="compute")
+        s_idle = g0_sample(swapouts="compute", memory_pressure="compute",
+                           ps_vs_pgrep="compute", single_cpu="inconclusive")
+        # 任何「無 memory 讀數」的組合都不可能是 PASS
+        for combo in ([s_busy, s_idle], [s_idle, s_idle], [s_busy, s_busy]):
+            with self.subTest(n_idle=sum(1 for x in combo if x is s_idle)):
+                self.assertNotEqual(cg.gate_g0(meas(g0_samples=combo))["status"], cg.PASS)
+
+
 class TestG1Exhaustion(unittest.TestCase):
     def test_claim_without_before_after_fails(self):
         """⛔ 只有宣稱沒有前→後 → 不受理，退回該層。"""

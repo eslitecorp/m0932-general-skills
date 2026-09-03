@@ -169,27 +169,46 @@ def gate_g0(meas: dict) -> dict:
                               "每一項都要明確標 memory／compute／inconclusive"}
         per_sample.append(dirs)
 
-    all_compute = all(all(d[k] == "compute" for k in keys) for d in per_sample)
-    if all_compute:
+    # 四種情況，逐一判定。
+    #
+    # 📌 修訂（第二次預先登記，2026-09-03）：原本的規則是「四項在**每一個**取樣點
+    #    都一致指向運算」才不受理。第一次真的套用就發現它過嚴：某台機器 12 個判據讀數
+    #    裡 11 個指向運算、0 個指向記憶體，只因為有一個取樣點落在閒置時刻
+    #    （突發的 CPU 消耗者剛結束，`single_cpu` 標成 inconclusive）就輸出「無法歸因」。
+    #    G0 問的是「瓶頸是不是記憶體」；**沒有任何一項指向記憶體時，這個問題已經有答案了**，
+    #    閒置時刻的 inconclusive 不該把它救回來。
+    #    改法對「有判據指向記憶體」的機器不生效 —— 那些走情況 3／4，結果不變。
+    mem_any = any(d[k] == "memory" for d in per_sample for k in keys)
+    compute_any = any(d[k] == "compute" for d in per_sample for k in keys)
+    all_compute_samples = [i + 1 for i, d in enumerate(per_sample)
+                           if all(d[k] == "compute" for k in keys)]
+
+    # 情況 1：沒有任何判據指向記憶體，且至少一個取樣點四項全指向運算 → 不受理
+    if not mem_any and all_compute_samples:
         return {"status": FAIL, "verdict": "不受理",
-                "reason": "四項判據在每一個取樣點都一致指向運算 → 本標準不受理第三層。"
+                "reason": f"沒有任何判據指向記憶體，且取樣 {all_compute_samples} "
+                          "四項全指向運算 → 本標準不受理第三層。"
                           "⛔ 升記憶體不會修好它；報告寫明並收在第二層",
                 "per_sample": per_sample}
 
-    any_memory = any(any(d[k] == "memory" for k in keys) for d in per_sample)
-    contradictory = [i + 1 for i, d in enumerate(per_sample)
-                     if any(d[k] == "memory" for k in keys)
-                     and any(d[k] == "compute" for k in keys)]
-    if any_memory and contradictory:
+    # 情況 2：有的指向記憶體、有的指向運算 → 真正的矛盾，不硬判
+    if mem_any and compute_any:
         return {"status": BLOCKED,
-                "reason": f"取樣 {contradictory} 的判據互相矛盾。⛔ 不要硬判 —— "
-                          "把四個值都列出來，說明無法歸因，停在這裡",
+                "reason": "判據互相矛盾（同時有指向記憶體與指向運算的讀數）。"
+                          "⛔ 不要硬判 —— 把四個值都列出來，說明無法歸因，停在這裡",
                 "per_sample": per_sample}
-    if not any_memory:
+
+    # 情況 3：完全沒有訊號（都是 inconclusive，或沒有一個取樣點成形）→ 無法歸因
+    if not mem_any:
         return {"status": BLOCKED,
-                "reason": "沒有任何判據指向記憶體，也不是一致指向運算 → 無法歸因",
+                "reason": "所有取樣點都沒有成形的訊號（無判據指向記憶體，"
+                          "也沒有任何一個取樣點四項全指向運算）→ 無法歸因。"
+                          "請在有負載的時點重取",
                 "per_sample": per_sample}
-    return {"status": PASS, "reason": "判據指向記憶體軸", "per_sample": per_sample}
+
+    # 情況 4：有判據指向記憶體且無指向運算者 → 過
+    return {"status": PASS, "reason": "判據指向記憶體軸，無指向運算的讀數",
+            "per_sample": per_sample}
 
 
 def gate_g1(meas: dict) -> dict:
