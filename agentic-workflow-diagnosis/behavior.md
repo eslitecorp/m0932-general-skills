@@ -11,13 +11,35 @@
 ## 取數
 
 ```bash
-python3 scripts/scan_sessions.py            # 人類可讀
-python3 scripts/scan_sessions.py --json     # 給報告產生器
+python3 scripts/scan_sessions.py --preflight   # 先跑這個：這台量得到什麼、量不到什麼
+python3 scripts/scan_sessions.py               # 人類可讀
+python3 scripts/scan_sessions.py --json        # 給報告產生器
 ```
 
 - 全量掃描 session 紀錄目錄，實測 207 session／87,765 行約 **4.5 秒**完成
+- ⛔ **先跑 `--preflight`。** 不看它就直接讀指標，會把「量不到」讀成「量到 0」——
+  這兩件事在本 skill 裡的處置完全相反。四個必看欄位見 `portability.md`
 - ⛔ **腳本只輸出統計量**。要擴充輸出欄位時，先確認不會帶出任何對話內容、程式碼或業務資訊
 - 「還開著／未封存」不在腳本範圍，須另查 `list_sessions` 的 `isRunning` / `isArchived` / `lastActivityAt`
+
+### 語料不完整時怎麼辦
+
+`--preflight` 或報告的 `corpus.corpus_truncated` 為 `true`，代表更早的紀錄已被保留期刪除。
+
+- ✅ **聲明限制、限縮結論**：受影響的指標只是這個視窗內的**下界**，不是總量
+- ✅ 把判斷重心移到當下現況（`scripts/probe_host.sh`）
+- ⛔ **不得建議延長保留期**。要機器改設定來配合工具，方向是反的
+  （`portability.md` 的 R2）。語料是什麼就是什麼
+
+### 使用強度不同的機器怎麼比
+
+絕對值（如「程式碼探勘 ≥ 20」）在 207 session 的機器與 7 session／40 天的機器上意義不同。
+跨機器對照一律看 `metric_1_index_bypass.intensity_normalized`：
+
+| 欄位 | 意義 |
+|---|---|
+| `explore_per_session` | 每個 session 的探勘次數 |
+| `explore_per_active_hour` | 每小時實際使用的探勘次數（`active_hours` 為 0 時回 `UNKNOWN`） |
 
 ---
 
@@ -30,9 +52,23 @@ python3 scripts/scan_sessions.py --json     # 給報告產生器
 ```text
 explore_cost = Read + Grep + Glob
              + Bash 中含唯讀探勘動詞者（grep|rg|ag|find|cat|bat|head|tail|sed|awk|ls|wc|tree）
-index_use    = mcp__code-review-graph__* + mcp__semble__* + mcp__gitlab__semantic_code_search
+index_use    = 工具名稱含任一索引樣式的 MCP 呼叫
 bypass_ratio = 程式碼探勘次數 / max(index_use, 1)
 ```
+
+**`index_use` 有三態，不是一個數字。** ⛔ 把「主機沒裝索引型 MCP」讀成 `0`
+就是在偽造一個行為旗標 —— 兩者的處置完全相反：
+
+| 主機狀態 | 輸出 | 處置 |
+|---|---|---|
+| 沒有任何索引型 MCP | `UNKNOWN` | **不是行為問題，硬旗標不成立** |
+| 有設定、0 次呼叫 | `0` + 🔴 | **是行為問題，指名並給建議** |
+| 有呼叫 | 次數 | 正常 |
+
+⛔ **索引樣式清單不可寫死成三個 server 名稱。**
+〔事證：某機用的是另一套索引工具，白名單三個名稱一次都沒出現，
+564 次工具呼叫命中 0 —— 照原樣判會得到一個假的 🔴 硬旗標〕
+本機的索引工具不在預設清單裡時，把名稱片段加進 `scripts/index-mcp-patterns.json`。
 
 - **只把「目標是程式碼」的探勘算進分子**：目標路徑落在某個 git repo 底下，或指向程式碼副檔名
 - ⛔ **不要用 session 的 cwd 當閘門。** 索引型 MCP 可以從任何 cwd 對任何 repo 查詢，
@@ -40,13 +76,21 @@ bypass_ratio = 程式碼探勘次數 / max(index_use, 1)
   〔事證：以 cwd 為閘門會得出「22 個 code repo session、索引使用 0」這種既真實又誤導的結論 ——
   實際上索引查詢全部發生在 cwd 不是 repo 的 session 裡〕
 
-**門檻**（相對值，每次掃描重算，不要抄下面的數字）
+**門檻**
 
 | 判定 | 條件 |
 |---|---|
-| 🔴 硬旗標 | `程式碼探勘 ≥ 20` 且 `index_use == 0` |
-| 🔴 紅 | ratio > 全體 p90 |
-| ⚠️ 黃 | ratio > 全體 p75 |
+| 🔴 硬旗標 | `程式碼探勘 ≥ 20` 且 `index_use == 0` 且 **`index_state == CONFIGURED`** |
+| 🔴 紅 | ratio > p90 — **僅在 `n ≥ 20` 時成立** |
+| ⚠️ 黃 | ratio > p75 — **僅在 `n ≥ 20` 時成立** |
+
+⛔ **樣本不足時不得使用 p75／p90。**
+〔事證：某機的 ratio 分布只有 **n = 4**，卻印出 `p75 = 48.0`、`p90 = 53.4` ——
+4 個點算 p90 統計上不成立，而且那 4 個點正是被評判的對象本身，是**門檻自引**〕
+
+`n < 20` 時腳本不輸出 `threshold_*`，改輸出帶 `n` 與 `is_threshold_grade: false` 的
+`per_session_ratio_sample_percentiles`。那組數字**只能當樣本描述，不得當判準**。
+此時只用硬旗標與絕對值，並在報告寫明樣本量。
 
 **給提案者的建議**：指名「這個 session 做了 N 次程式碼探勘、0 次索引查詢」，
 建議探勘型任務開頭先建圖再語意搜尋，把 `get_impact_radius` 從 review 場景推廣出去。
@@ -117,10 +161,14 @@ dup_read_rate = 重複 Read 次數 / 不重複檔案數
 ## 可攜性的誠實邊界
 
 **指標的概念可攜，自動量測不可攜。** session 紀錄是 Claude Code 專有格式；
-其他 harness（Roo Code／Antigravity 等）沒有同構的紀錄，`scan_sessions.py` 在那裡跑不出東西。
+其他 harness（Cursor／Windsurf／OpenCode／Cline／Roo Code／Antigravity 等）沒有同構的紀錄，
+`scan_sessions.py` 在那裡跑不出東西。
 
-→ **其他 harness 走人工自陳版**：用同一組問題（探勘怎麼做的？有沒有 delegate？session 開多久？），
-答案靠自述而非掃描。**要明講這個落差，不要讓人以為跑得出數字。**
+→ **其他 harness 走人工自陳版**：`portability.md` 有照五個指標寫好的問卷。
+自陳答案要**標為自陳**，不得與掃描數字混在同一張表裡比較。
+**要明講這個落差，不要讓人以為跑得出數字。**
+
+跨裝置的完整失效清單（14 類）與兩條治理規則見 `portability.md`。**每次換機器先讀那一份。**
 
 ---
 
@@ -128,10 +176,14 @@ dup_read_rate = 重複 Read 次數 / 不重複檔案數
 
 | 段落 | 狀態 |
 |---|---|
-| 指標 1、2、3、5 的計算式與陷阱 | ✅ **已在一台機器上實地驗證**（2026-08-28，207 session／87,765 行／0 解析失敗） |
-| 指標 4 的兩個 ⛔ | ✅ 已實測否證（774h span、184.6h 中位拖尾） |
-| p75／p90 門檻的**跨人適用性** | ⚠️ **未驗證**。目前分布只來自一台機器、一種角色。第二個人跑過之後才知道門檻要不要分角色 |
+| 指標 1、2、3、5 的計算式與陷阱 | ✅ **已在兩台機器實地驗證**（裝置 A：207 session／87,765 行；裝置 B：7 session／2,384 行；兩台皆 0 解析失敗） |
+| 指標 4 的兩個 ⛔ | ✅ 已實測否證（774h span、184.6h 中位拖尾），並有 fixture 測試覆蓋 |
+| `index_use` 的三態 | ✅ 裝置 B 是「有設定、process 活著、0 次呼叫」的實例，這一態在 v0.1 被誤壓成硬旗標 |
+| p75／p90 門檻的**跨人適用性** | ⚠️ **仍未驗證，且 v0.2 起在 `n < 20` 時不再輸出**。兩台**不構成分布** —— 正解不是校準更好的門檻，是不輸出 |
 | 「過度切分」的 p95 門檻 | ⚠️ **未驗證**。僅觀察到單一極端案例（一個 session 派了 46 個 subagent），不足以定門檻 |
-| 指標 3 的「斜率為正」判定 | ⚠️ **未實作**。目前只實作峰值，斜率待補 |
+| 指標 3 的「斜率為正」判定 | ⚠️ **未實作**。目前只實作峰值；斜率沒有實作，也沒有排入 |
+| 強度正規化（`per_session`／`per_active_hour`） | ⚠️ **已實作但未跨裝置驗證**。兩台的值還沒放在一起比較過 |
+| 語料截斷偵測 | ✅ 裝置 B 實測命中（語料涵蓋 106 天 vs 保留期 30 天，`list_sessions` 另有 3 個月的落差） |
 
-⛔ 沒驗證過的放待累積，**不要憑空杜撰**。每次套用到新的人／新的機器，就回來更新這張表。
+⛔ 沒驗證過的放待累積，**不要憑空杜撰**。每次套用到新的人／新的機器，
+就回來更新這張表，並在 `portability.md` 的裝置 profile 加一列。
