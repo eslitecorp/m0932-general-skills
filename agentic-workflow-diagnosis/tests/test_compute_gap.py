@@ -33,7 +33,8 @@ def decl(**over):
         "incompressible": [
             {"name": "svc-a", "scales_with_concurrency": True, "per_unit_mb": 80,
              "observation": "關掉後有 3 次工具呼叫失敗紀錄",
-             "shared_alternative_reason": "資料落地限制"},
+             "shared_alternative_reason": "資料落地限制",
+             "non_resident_alternative": "http transport"},
         ],
     }
     d.update(over)
@@ -87,8 +88,10 @@ def meas(**over):
         "g0_samples": [g0_sample(), g0_sample()],
         "g1_evidence": [{"item": "索引可及性", "remeasure_cmd": "rerun scan",
                          "before": "6/152", "after": "7/153"}],
-        "g1_l3_ab": [{"candidate": "svc-a", "success_rate": 1.0, "e2e_time": 12.0,
-                      "e2e_bill": 0.4, "resident_footprint_mb": 400}],
+        "g1_l3_ab": [{"item": "svc-a", "candidate": "svc-a 常駐 vs http 共享",
+                      "success_rate": 1.0, "e2e_time": 12.0,
+                      "e2e_bill": 0.4, "resident_footprint_mb": 400,
+                      "alternative_disproved": True}],
         "l1_root_cause_fixed": True,
         "downclock_experiment": {"ran": True, "degraded": True,
                                  "tasks": [f"t{i}" for i in range(10)]},
@@ -259,7 +262,8 @@ class TestWorkingSetDeclaration(unittest.TestCase):
         d["incompressible"] = [{"name": "browser", "scales_with_concurrency": False,
                                 "working_set_mb": ws,
                                 "observation": "當下使用證據：45 個 process，取樣期間有 CPU 活動",
-                                "shared_alternative_reason": "延遲不可容忍"}]
+                                "shared_alternative_reason": "延遲不可容忍",
+                                "non_resident_alternative": "無"}]
         m = meas(attribution=[{"name": "browser", "layer": "L2", "footprint_mb": 9571}])
         return cg.baseline(d, m)
 
@@ -277,7 +281,8 @@ class TestWorkingSetDeclaration(unittest.TestCase):
         """沒宣告工作集的 L2 照樣整項排除，並指名原因。"""
         d = decl()
         d["incompressible"] = [{"name": "browser", "observation": "有在用",
-                                "shared_alternative_reason": "延遲不可容忍"}]
+                                "shared_alternative_reason": "延遲不可容忍",
+                                "non_resident_alternative": "無"}]
         m = meas(attribution=[{"name": "browser", "layer": "L2", "footprint_mb": 9571}])
         bl = cg.baseline(d, m)
         self.assertTrue(bl["intersection_empty"])
@@ -287,7 +292,8 @@ class TestWorkingSetDeclaration(unittest.TestCase):
         """⛔ 工作集不能繞過 observation 這道門。"""
         d = decl()
         d["incompressible"] = [{"name": "browser", "working_set_mb": 4000,
-                                "observation": "", "shared_alternative_reason": "延遲不可容忍"}]
+                                "observation": "", "shared_alternative_reason": "延遲不可容忍",
+                                "non_resident_alternative": "無"}]
         m = meas(attribution=[{"name": "browser", "layer": "L2", "footprint_mb": 9571}])
         self.assertTrue(cg.baseline(d, m)["intersection_empty"])
 
@@ -338,7 +344,7 @@ class TestG1Exhaustion(unittest.TestCase):
         """⛔ 只有宣稱沒有前→後 → 不受理，退回該層。"""
         m = meas(g1_evidence=[{"item": "某建議", "remeasure_cmd": "cmd",
                                "before": None, "after": "好了"}])
-        g = cg.gate_g1(m)
+        g = cg.gate_g1(decl(), m)
         self.assertEqual(g["status"], cg.FAIL)
         self.assertTrue(any("沒有前→後" in p for p in g["problems"]))
 
@@ -346,19 +352,104 @@ class TestG1Exhaustion(unittest.TestCase):
         """⛔ A/B 缺任一欄即不受理，不得用三欄推論。"""
         m = meas(g1_l3_ab=[{"candidate": "svc-a", "success_rate": 1.0,
                             "e2e_time": 12.0, "resident_footprint_mb": 400}])
-        g = cg.gate_g1(m)
+        g = cg.gate_g1(decl(), m)
         self.assertEqual(g["status"], cg.FAIL)
         self.assertTrue(any("缺欄" in p for p in g["problems"]))
 
     def test_l3_ab_never_run_fails(self):
         """A/B 從未實測 → 不過。這是本標準目前真實的狀態。"""
-        g = cg.gate_g1(meas(g1_l3_ab=[]))
+        g = cg.gate_g1(decl(), meas(g1_l3_ab=[]))
         self.assertEqual(g["status"], cg.FAIL)
 
     def test_l1_manual_cleanup_without_root_cause_fails(self):
-        g = cg.gate_g1(meas(l1_root_cause_fixed=False))
+        g = cg.gate_g1(decl(), meas(l1_root_cause_fixed=False))
         self.assertEqual(g["status"], cg.FAIL)
         self.assertTrue(any("成因" in p for p in g["problems"]))
+
+
+class TestG1CandidateCompleteness(unittest.TestCase):
+    """
+    第五次預先登記：G1 的候選集完整性。
+
+    原本只檢查「列出來的每一列四欄齊不齊」，沒檢查「該列的候選有沒有全部列出來」。
+    於是只測最好測的那一個就能過關 —— 而且把項目歸成 L4 就能讓它完全退出候選集。
+    ⚠️ 這次修訂的方向**不利於申請方**（它讓 G1 更難過）。
+    """
+
+    def _two_items(self, ab_rows):
+        d = decl()
+        d["incompressible"] = [
+            {"name": "svc-a", "observation": "有在用",
+             "shared_alternative_reason": "資料落地限制",
+             "non_resident_alternative": "冷載入"},
+            {"name": "svc-b", "observation": "有在用",
+             "shared_alternative_reason": "資料落地限制",
+             "non_resident_alternative": "http transport"},
+        ]
+        m = meas(attribution=[{"name": "svc-a", "layer": "L4", "footprint_mb": 100},
+                              {"name": "svc-b", "layer": "L4", "footprint_mb": 200}],
+                 g1_l3_ab=ab_rows)
+        return d, m
+
+    def _row(self, item, disproved=True):
+        return {"item": item, "success_rate": 1.0, "e2e_time": 1.0, "e2e_bill": 0.0,
+                "resident_footprint_mb": 100, "alternative_disproved": disproved}
+
+    def test_testing_only_the_easy_candidate_fails(self):
+        """⛔ 只測一個候選就想過關 → 不過，且要指名漏了誰。"""
+        d, m = self._two_items([self._row("svc-a")])
+        g = cg.gate_g1(d, m)
+        self.assertEqual(g["status"], cg.FAIL)
+        self.assertTrue(any("svc-b" in p for p in g["problems"]))
+
+    def test_covering_all_candidates_passes(self):
+        d, m = self._two_items([self._row("svc-a"), self._row("svc-b")])
+        self.assertEqual(cg.gate_g1(d, m)["status"], cg.PASS)
+
+    def test_omitting_the_alternative_question_fails(self):
+        """⛔ 「有沒有不需常駐的替代實作」這一問不得省略。"""
+        d, m = self._two_items([self._row("svc-a"), self._row("svc-b")])
+        del d["incompressible"][0]["non_resident_alternative"]
+        g = cg.gate_g1(d, m)
+        self.assertEqual(g["status"], cg.FAIL)
+        self.assertTrue(any("不得省略" in p for p in g["problems"]))
+
+    def test_measured_l3_is_always_a_candidate(self):
+        """實測層別是 L3 的項目一律進候選集，就算沒被宣告。"""
+        d = decl()
+        m = meas(attribution=[{"name": "svc-a", "layer": "L4", "footprint_mb": 100},
+                              {"name": "orphan-l3", "layer": "L3", "footprint_mb": 50}])
+        g = cg.gate_g1(d, m)
+        self.assertEqual(g["status"], cg.FAIL)
+        self.assertTrue(any("orphan-l3" in p for p in g["problems"]))
+
+    def test_ab_without_disproved_verdict_fails(self):
+        """A/B 跑了但沒說「該替代有沒有被否證」→ 不算跑完。"""
+        row = self._row("svc-a"); del row["alternative_disproved"]
+        d, m = self._two_items([row, self._row("svc-b")])
+        g = cg.gate_g1(d, m)
+        self.assertEqual(g["status"], cg.FAIL)
+        self.assertTrue(any("alternative_disproved" in p for p in g["problems"]))
+
+    def test_untested_alternative_keeps_item_out_of_the_baseline(self):
+        """
+        ⛔ 這一條才是真正的牙齒：G1 不過的同時，基線也不能把那些項目算進去。
+        否則 R 會虛報 —— 「我把它歸成 L4」在數字上仍然有效。
+        """
+        d, m = self._two_items([self._row("svc-a")])
+        bl = cg.baseline(d, m)
+        self.assertEqual([c["name"] for c in bl["counted"]], ["svc-a"])
+        self.assertTrue(any(e["name"] == "svc-b" and "L3 待驗" in e["reason"]
+                            for e in bl["excluded"]))
+
+    def test_alternative_not_disproved_also_excluded(self):
+        """A/B 顯示替代可行（未被否證）→ 該項是 L3，同樣不計入基線。"""
+        d, m = self._two_items([self._row("svc-a", disproved=False),
+                                self._row("svc-b")])
+        bl = cg.baseline(d, m)
+        self.assertNotIn("svc-a", [c["name"] for c in bl["counted"]])
+        self.assertTrue(any(e["name"] == "svc-a" and "未被否證" in e["reason"]
+                            for e in bl["excluded"]))
 
 
 class TestG2Gap(unittest.TestCase):

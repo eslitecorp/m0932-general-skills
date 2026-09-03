@@ -36,6 +36,45 @@ SHARED_ALT_REASONS = {
     "資料落地限制", "延遲不可容忍", "離線可用性", "供應商中斷降級",
 }
 
+# environment.md 對 L3 的定義：「同能力有不需常駐的替代實作」。
+# 宣告的不可壓縮項必須正面回答有沒有這種替代 —— ⛔ 這一問不得省略，
+# 否則分析者可以把項目直接放進 L4 而永遠不必面對 A/B（第五次預先登記的理由）。
+NON_RESIDENT_ALTERNATIVES = {"遠端 API", "http transport", "原生執行", "冷載入"}
+NO_ALTERNATIVE = "無"
+
+
+def l3_candidates(decl: dict, meas: dict) -> tuple[set, list]:
+    """
+    回傳 (需要 A/B 的候選集, 缺答的項目)。
+
+    候選集 = 宣告了不需常駐替代實作的項目 ∪ 實測層別為 L3 的項目。
+    ⛔ 「我把它歸成 L4」不能讓它退出候選集 —— 那正是要防的漏洞。
+    """
+    cands, unanswered = set(), []
+    for d in decl.get("incompressible") or []:
+        name = d.get("name")
+        if not name:
+            continue
+        alt = d.get("non_resident_alternative")
+        if alt is None or not str(alt).strip():
+            unanswered.append(name)
+        elif str(alt).strip() != NO_ALTERNATIVE:
+            cands.add(name)
+    for a in meas.get("attribution") or []:
+        if a.get("layer") == "L3" and a.get("name"):
+            cands.add(a["name"])
+    return cands, unanswered
+
+
+def ab_outcome(meas: dict) -> dict:
+    """A/B 的結論：item → alternative_disproved（True／False／None=未測）。"""
+    out = {}
+    for row in meas.get("g1_l3_ab") or []:
+        item = row.get("item") or row.get("candidate")
+        if item:
+            out[item] = row.get("alternative_disproved")
+    return out
+
 
 # --- 無因次比值 -------------------------------------------------------------
 
@@ -94,6 +133,8 @@ def baseline(decl: dict, meas: dict) -> dict:
     declared = {d["name"]: d for d in (decl.get("incompressible") or []) if d.get("name")}
     measured = {a["name"]: a for a in (meas.get("attribution") or []) if a.get("name")}
     conc = decl.get("concurrency_declared")
+    cands, _ = l3_candidates(decl, meas)
+    ab = ab_outcome(meas)
 
     counted, excluded = [], []
     for name, d in declared.items():
@@ -107,6 +148,17 @@ def baseline(decl: dict, meas: dict) -> dict:
             excluded.append({"name": name, "reason": "宣告了但說不出觀察證據 → 不計入",
                              "mb": a.get("footprint_mb", UNKNOWN)})
             continue
+        # ⛔ 第五次預先登記：有不需常駐的替代實作、而該替代還沒被 A/B 否證的項目，
+        #    一律不得計為 L4。否則「我把它歸成 L4」就能繞過整道 A/B。
+        if name in cands and ab.get(name) is not True:
+            state = ("A/B 未跑" if name not in ab
+                     else "A/B 顯示該替代可行（未被否證）")
+            excluded.append({"name": name,
+                             "reason": f"宣告了不需常駐的替代實作（{d.get('non_resident_alternative')}），"
+                                       f"但{state} → 仍屬 L3 待驗，不計入",
+                             "mb": a.get("footprint_mb", UNKNOWN)})
+            continue
+
         layer = a.get("layer")
         ws = d.get("working_set_mb")
         if layer != "L4":
@@ -239,7 +291,7 @@ def gate_g0(meas: dict) -> dict:
             **detail}
 
 
-def gate_g1(meas: dict) -> dict:
+def gate_g1(decl: dict, meas: dict) -> dict:
     """G1 前兩層窮盡。每條要有前→後；L3 的 A/B 四欄缺一即不過。"""
     problems = []
 
@@ -254,15 +306,31 @@ def gate_g1(meas: dict) -> dict:
             problems.append(f"「{name}」只有宣稱、沒有前→後的實際數字")
 
     ab = meas.get("g1_l3_ab") or []
-    if not ab:
-        problems.append("L3 的 A/B 四欄從未實測（environment.md L3 第一條：缺一不受理）")
     cols = ("success_rate", "e2e_time", "e2e_bill", "resident_footprint_mb")
     for row in ab:
-        cand = row.get("candidate", "<未命名>")
+        cand = row.get("item") or row.get("candidate") or "<未命名>"
         miss = [c for c in cols if not isinstance(row.get(c), (int, float))]
         if miss:
             problems.append(f"L3 候選「{cand}」的 A/B 缺欄 {miss} → "
                             "⛔ 不得用三欄推論")
+        if row.get("alternative_disproved") not in (True, False):
+            problems.append(f"L3 候選「{cand}」沒有給 alternative_disproved "
+                            "（該替代到底有沒有被否證）")
+
+    # ⛔ 第五次預先登記：候選集完整性。原本只檢查「列出來的每一列四欄齊不齊」，
+    #    沒檢查「該列的候選有沒有全部列出來」—— 於是只測最好測的那一個就能過關。
+    cands, unanswered = l3_candidates(decl, meas)
+    if unanswered:
+        problems.append(f"這些宣告項沒有回答「有沒有不需常駐的替代實作」：{unanswered}。"
+                        "⛔ 這一問不得省略 —— 省略它就能把項目直接放進 L4 而不必面對 A/B")
+    tested = set(ab_outcome(meas))
+    missing = sorted(cands - tested)
+    if missing:
+        problems.append(f"這些 L3 候選還沒跑 A/B 四欄：{missing}。"
+                        "⛔ 候選集要跑完，不得只測最好測的那一個")
+    if not cands and not ab:
+        problems.append("沒有任何 L3 候選也沒有 A/B —— 請確認每個宣告項都答過"
+                        "「有沒有不需常駐的替代實作」")
 
     l1 = meas.get("l1_root_cause_fixed")
     if l1 is not True:
@@ -376,7 +444,7 @@ def gate_g3(decl: dict, meas: dict, baseline_mb=None) -> dict:
 def evaluate(decl: dict, meas: dict) -> dict:
     bl = baseline(decl, meas)
     r = ratios(decl, meas, bl["baseline_mb"])
-    g = {"G0": gate_g0(meas), "G1": gate_g1(meas),
+    g = {"G0": gate_g0(meas), "G1": gate_g1(decl, meas),
          "G2": gate_g2(bl, r, meas), "G3": gate_g3(decl, meas, bl["baseline_mb"])}
 
     order = ["G0", "G1", "G2", "G3"]
