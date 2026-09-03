@@ -267,6 +267,7 @@ L4 就無法否證（「我需要」→ L4 → 缺口成立）。
 | `scripts/probe_host.sh` | 第零層的當下現況 probe（macOS） |
 | `scripts/index-mcp-patterns.json` | 本機的索引型 MCP 不在預設清單裡時，加進去 |
 | `scripts/probe_realtime.sh` | 干擾軸的窗內尾端取樣器（macOS，免 sudo，先自量成本） |
+| `scripts/select_task_set.py` | 降載實驗的任務集選集器（規則化、決定性、只出統計量）|
 | `scripts/downclock_ballast.sh` | G2 降載實驗的壓艙物（macOS，免 sudo，唯讀）。⚠️ 只能把機器壓小，⛔ 模擬不了更大的機器 |
 | `scripts/compute_gap.py` | 把四道閘門變成可執行的判定；同一份輸入只有一個結論 |
 | `tests/` | 改動 `scan_sessions.py` 或 `compute_gap.py` 後必跑（92 個） |

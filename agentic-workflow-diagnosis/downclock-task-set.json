@@ -1,0 +1,169 @@
+{
+  "n_requested": 10,
+  "n_selected": 10,
+  "insufficient": false,
+  "work_types_covered": [
+    "code review",
+    "文件與報告產出",
+    "未分類",
+    "環境與腳本操作",
+    "票務與 GTD",
+    "程式碼探勘與修改",
+    "網路研究"
+  ],
+  "pool_size": 172,
+  "tasks": [
+    {
+      "session_id": "2172f9d2-d1cb-423f-a1d3-52a3fdcc9eb1",
+      "last_activity": "2026-08-17T03:42:00.927000+00:00",
+      "lines": 3007,
+      "tool_calls": 642,
+      "distinct_tools": 15,
+      "work_type": "環境與腳本操作",
+      "top_tools": [
+        "Bash",
+        "Edit",
+        "TaskUpdate",
+        "Read"
+      ],
+      "picked_because": "覆蓋工作型態「環境與腳本操作」"
+    },
+    {
+      "session_id": "b731adb5-51a5-40fa-ac54-6b7358f7ecb7",
+      "last_activity": "2026-08-30T05:16:02.274000+00:00",
+      "lines": 2882,
+      "tool_calls": 480,
+      "distinct_tools": 11,
+      "work_type": "程式碼探勘與修改",
+      "top_tools": [
+        "Bash",
+        "Edit",
+        "Read",
+        "Write"
+      ],
+      "picked_because": "覆蓋工作型態「程式碼探勘與修改」"
+    },
+    {
+      "session_id": "b1754c27-f40e-46ed-8cd3-00980fb9e145",
+      "last_activity": "2026-08-20T02:23:31.059000+00:00",
+      "lines": 583,
+      "tool_calls": 127,
+      "distinct_tools": 16,
+      "work_type": "網路研究",
+      "top_tools": [
+        "mcp__cortex__get_issues",
+        "WebFetch",
+        "Bash",
+        "mcp__cortex__get_cases"
+      ],
+      "picked_because": "覆蓋工作型態「網路研究」"
+    },
+    {
+      "session_id": "96ea52f1-d204-4509-a8b9-1909e8b1f985",
+      "last_activity": "2026-08-19T05:50:29.872000+00:00",
+      "lines": 456,
+      "tool_calls": 109,
+      "distinct_tools": 18,
+      "work_type": "票務與 GTD",
+      "top_tools": [
+        "Bash",
+        "mcp__youtrack__get_issue",
+        "mcp__youtrack__search_issues",
+        "mcp__edb0d7f8-9676-42b5-b25b-d2389c6e554b__search_messages"
+      ],
+      "picked_because": "覆蓋工作型態「票務與 GTD」"
+    },
+    {
+      "session_id": "5f0680ca-e8c4-4424-9064-c8b94d24bf9d",
+      "last_activity": "2026-08-06T05:44:26.779000+00:00",
+      "lines": 65,
+      "tool_calls": 12,
+      "distinct_tools": 6,
+      "work_type": "未分類",
+      "top_tools": [
+        "mcp__cortex__get_issues",
+        "ToolSearch",
+        "mcp__cortex__get_cases",
+        "AskUserQuestion"
+      ],
+      "picked_because": "覆蓋工作型態「未分類」"
+    },
+    {
+      "session_id": "3763d25f-a590-4c91-a5bf-8fc0c731170e",
+      "last_activity": "2026-08-05T05:34:32.560000+00:00",
+      "lines": 50,
+      "tool_calls": 9,
+      "distinct_tools": 5,
+      "work_type": "文件與報告產出",
+      "top_tools": [
+        "mcp__606dcce5-57b4-470a-9274-dfca397e9c00__table_rows_read",
+        "ToolSearch",
+        "mcp__606dcce5-57b4-470a-9274-dfca397e9c00__content_read",
+        "Skill"
+      ],
+      "picked_because": "覆蓋工作型態「文件與報告產出」"
+    },
+    {
+      "session_id": "509e2347-de33-414b-8fdd-9cdd79f58595",
+      "last_activity": "2026-08-06T05:37:40.854000+00:00",
+      "lines": 55,
+      "tool_calls": 8,
+      "distinct_tools": 4,
+      "work_type": "code review",
+      "top_tools": [
+        "mcp__gitlab__search",
+        "ToolSearch",
+        "Agent",
+        "mcp__gitlab__get_merge_request_diffs"
+      ],
+      "picked_because": "覆蓋工作型態「code review」"
+    },
+    {
+      "session_id": "f476f08c-c6e5-4e05-86cc-0c42e07a6da2",
+      "last_activity": "2026-08-18T09:04:20.159000+00:00",
+      "lines": 2156,
+      "tool_calls": 427,
+      "distinct_tools": 19,
+      "work_type": "環境與腳本操作",
+      "top_tools": [
+        "Bash",
+        "Edit",
+        "Read",
+        "ToolSearch"
+      ],
+      "picked_because": "補足（跨型態輪替第 1 輪，型態「環境與腳本操作」內最重者）"
+    },
+    {
+      "session_id": "84b08fc1-081a-4902-84bb-9e876670ede3",
+      "last_activity": "2026-08-20T07:44:19.417000+00:00",
+      "lines": 1200,
+      "tool_calls": 251,
+      "distinct_tools": 49,
+      "work_type": "程式碼探勘與修改",
+      "top_tools": [
+        "Edit",
+        "ToolSearch",
+        "Bash",
+        "mcp__youtrack__search_issues"
+      ],
+      "picked_because": "補足（跨型態輪替第 1 輪，型態「程式碼探勘與修改」內最重者）"
+    },
+    {
+      "session_id": "bc9601c7-bf85-467c-8f83-7e035d89734a",
+      "last_activity": "2026-08-19T10:30:34.751000+00:00",
+      "lines": 297,
+      "tool_calls": 60,
+      "distinct_tools": 17,
+      "work_type": "票務與 GTD",
+      "top_tools": [
+        "mcp__youtrack__search_issues",
+        "mcp__youtrack__get_issue",
+        "mcp__d585671d-f72a-4437-9c3f-9bda18bb6308__list_issues",
+        "Write"
+      ],
+      "picked_because": "補足（跨型態輪替第 1 輪，型態「票務與 GTD」內最重者）"
+    }
+  ],
+  "_rule": "①tool_calls 遞減 + session_id 遞增排序 ②覆蓋階段：每個工作型態各取該型態內最重的一個 ③補足階段：跨型態輪替，每輪各型態取尚未選入且最重的，直到 n。決定性、無 random。⛔ 改動規則須新一次預先登記",
+  "_privacy": "只含 session id／工具名／計數／時間。無對話內容、無路徑、無標題"
+}
