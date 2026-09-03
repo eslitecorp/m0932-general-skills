@@ -415,7 +415,7 @@ def gate_g3(decl: dict, meas: dict, baseline_mb=None) -> dict:
                 problems.append("宣告式階梯要給錨點（anchor_mb）")
             elif abs(anchor - baseline_mb) > 1:
                 problems.append(
-                    f"⛔ 錨點 {anchor} MB 不等於應然基線 {baseline_mb} MB。"
+                    f"錨點 {anchor} MB 不等於應然基線 {baseline_mb} MB。"
                     "標準明訂不得以現值當需求基準 —— 現值可能已經含該被刪掉的浪費")
             else:
                 cover = next((t for t in sorted(tiers) if anchor / 1024.0 <= t),
