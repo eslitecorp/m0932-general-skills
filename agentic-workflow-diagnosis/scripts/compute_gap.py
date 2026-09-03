@@ -147,68 +147,79 @@ def baseline(decl: dict, meas: dict) -> dict:
 
 # --- 四道閘門 ---------------------------------------------------------------
 
+# G0 的證據項。每一項只在「present」時是正面證據；
+# ⛔ absent 不是反面證據 —— 缺乏 X 的證據不等於非 X 的證據（見第三次預先登記的理由）。
+MEMORY_EVIDENCE = {
+    "M1_swapouts_rising": "Swapouts > 0 且在觀測窗內增加",
+    "M2_ps_truncated": "ps -ax 計數顯著少於 pgrep -f .（ps 在壓力下被截斷）",
+    "M3_compressor_absorbing": "壓縮器在觀測窗內持續吸收，且 φ 極低",
+    "M4_pressure_low_falling": "memory_pressure 自報可用率低且下降",
+}
+COMPUTE_EVIDENCE = {
+    "C1_single_process_saturating": "單一 process 瞬時 CPU 遠超 100%（top -l 2 第二次採樣）",
+    "C2_load_high_without_memory": "λ 高，且無任何記憶體證據",
+}
+
+
 def gate_g0(meas: dict) -> dict:
     """
-    G0 軸線。四項判據的方向由分析者標注（"memory"／"compute"／"inconclusive"），
-    腳本驗證取樣點數與組合邏輯 —— ⛔ 不自己訂 memory_pressure 幾 % 算低。
+    G0 軸線：問兩個獨立的問題 —— 有沒有記憶體的正面證據？有沒有運算的正面證據？
+
+    📌 第三次預先登記（2026-09-03）改成這個結構。原本是「四項判據各投一票」，
+       但那四項的兩欄不對稱：`ps` 被截斷是記憶體壓力的正面證據，
+       `ps` 沒被截斷卻跟每一種狀態都相容（閒置、CPU 打滿、記憶體吃緊但未達截斷門檻），
+       鑑別力是零。把鑑別力為零的讀數標成「指向運算」就是製造訊號 ——
+       與 A1–A4「量測失敗時給出一個看起來正常的數字」同型，只是這次是
+       「缺乏證據時給出一個看起來像證據的標籤」。判據 1 與 4 有同樣的不對稱。
+
+    ⚠️ **這次修訂的方向有利於申請方**（它把「三項記憶體＋一項空洞的運算」從矛盾變成過關）。
+       第一次修訂的方向相反，所以那次可以拿方向當「不是裁剪」的證據，這次不能。
+       這次的理由只能靠論證本身站住，而且必須寫在審查文件的最前面，不得藏在修訂紀錄裡。
+
+    每一項證據由分析者標 present／absent／unknown 並附值；
+    腳本驗證取樣點數與組合邏輯 —— ⛔ 仍然不自己訂「memory_pressure 幾 % 算低」。
     """
     samples = meas.get("g0_samples") or []
     if len(samples) < 2:
         return {"status": BLOCKED,
-                "reason": f"只有 {len(samples)} 個取樣點。判據必須在不同負載時點各取一次，"
+                "reason": f"只有 {len(samples)} 個取樣點。證據必須在不同負載時點各取一次，"
                           "不得用單一快照"}
-    keys = ("swapouts", "memory_pressure", "ps_vs_pgrep", "single_cpu")
+
+    all_keys = list(MEMORY_EVIDENCE) + list(COMPUTE_EVIDENCE)
     per_sample = []
     for i, s in enumerate(samples):
-        dirs = {k: (s.get(k) or {}).get("direction") for k in keys}
-        missing = [k for k, v in dirs.items() if v not in
-                   ("memory", "compute", "inconclusive")]
-        if missing:
+        st = {k: (s.get(k) or {}).get("state") for k in all_keys}
+        bad = [k for k, v in st.items() if v not in ("present", "absent", "unknown")]
+        if bad:
             return {"status": BLOCKED,
-                    "reason": f"取樣 {i + 1} 的判據 {missing} 沒有標注方向。"
-                              "每一項都要明確標 memory／compute／inconclusive"}
-        per_sample.append(dirs)
+                    "reason": f"取樣 {i + 1} 的證據項 {bad} 沒有標注狀態。"
+                              "每一項都要標 present／absent／unknown。"
+                              "⛔ 標不出來就是 unknown，不要留空也不要猜"}
+        per_sample.append(st)
 
-    # 四種情況，逐一判定。
-    #
-    # 📌 修訂（第二次預先登記，2026-09-03）：原本的規則是「四項在**每一個**取樣點
-    #    都一致指向運算」才不受理。第一次真的套用就發現它過嚴：某台機器 12 個判據讀數
-    #    裡 11 個指向運算、0 個指向記憶體，只因為有一個取樣點落在閒置時刻
-    #    （突發的 CPU 消耗者剛結束，`single_cpu` 標成 inconclusive）就輸出「無法歸因」。
-    #    G0 問的是「瓶頸是不是記憶體」；**沒有任何一項指向記憶體時，這個問題已經有答案了**，
-    #    閒置時刻的 inconclusive 不該把它救回來。
-    #    改法對「有判據指向記憶體」的機器不生效 —— 那些走情況 3／4，結果不變。
-    mem_any = any(d[k] == "memory" for d in per_sample for k in keys)
-    compute_any = any(d[k] == "compute" for d in per_sample for k in keys)
-    all_compute_samples = [i + 1 for i, d in enumerate(per_sample)
-                           if all(d[k] == "compute" for k in keys)]
+    mem_hits = sorted({k for d in per_sample for k in MEMORY_EVIDENCE
+                       if d[k] == "present"})
+    cpu_hits = sorted({k for d in per_sample for k in COMPUTE_EVIDENCE
+                       if d[k] == "present"})
+    detail = {"memory_evidence_present": mem_hits, "compute_evidence_present": cpu_hits,
+              "per_sample": per_sample}
 
-    # 情況 1：沒有任何判據指向記憶體，且至少一個取樣點四項全指向運算 → 不受理
-    if not mem_any and all_compute_samples:
+    if mem_hits and not cpu_hits:
+        return {"status": PASS,
+                "reason": f"有記憶體的正面證據 {mem_hits}，無運算的正面證據", **detail}
+    if cpu_hits and not mem_hits:
         return {"status": FAIL, "verdict": "不受理",
-                "reason": f"沒有任何判據指向記憶體，且取樣 {all_compute_samples} "
-                          "四項全指向運算 → 本標準不受理第三層。"
-                          "⛔ 升記憶體不會修好它；報告寫明並收在第二層",
-                "per_sample": per_sample}
-
-    # 情況 2：有的指向記憶體、有的指向運算 → 真正的矛盾，不硬判
-    if mem_any and compute_any:
+                "reason": f"有運算的正面證據 {cpu_hits}，無記憶體的正面證據 → "
+                          "本標準不受理第三層。⛔ 升記憶體不會修好它；"
+                          "報告寫明並收在第二層", **detail}
+    if mem_hits and cpu_hits:
         return {"status": BLOCKED,
-                "reason": "判據互相矛盾（同時有指向記憶體與指向運算的讀數）。"
-                          "⛔ 不要硬判 —— 把四個值都列出來，說明無法歸因，停在這裡",
-                "per_sample": per_sample}
-
-    # 情況 3：完全沒有訊號（都是 inconclusive，或沒有一個取樣點成形）→ 無法歸因
-    if not mem_any:
-        return {"status": BLOCKED,
-                "reason": "所有取樣點都沒有成形的訊號（無判據指向記憶體，"
-                          "也沒有任何一個取樣點四項全指向運算）→ 無法歸因。"
-                          "請在有負載的時點重取",
-                "per_sample": per_sample}
-
-    # 情況 4：有判據指向記憶體且無指向運算者 → 過
-    return {"status": PASS, "reason": "判據指向記憶體軸，無指向運算的讀數",
-            "per_sample": per_sample}
+                "reason": f"兩種正面證據同時存在（記憶體 {mem_hits}／運算 {cpu_hits}）。"
+                          "⛔ 不要硬判 —— 把值都列出來，說明無法歸因，停在這裡", **detail}
+    return {"status": BLOCKED,
+            "reason": "兩種正面證據都沒有 —— 這台在觀測窗內沒有成形的瓶頸。"
+                      "請在有負載的時點重取；⛔ 不得把「沒有瓶頸」讀成任一方的證據",
+            **detail}
 
 
 def gate_g1(meas: dict) -> dict:

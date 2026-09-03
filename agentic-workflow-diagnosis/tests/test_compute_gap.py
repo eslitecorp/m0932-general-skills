@@ -40,11 +40,34 @@ def decl(**over):
     return d
 
 
-def g0_sample(**dirs):
-    base = {k: "memory" for k in
-            ("swapouts", "memory_pressure", "ps_vs_pgrep", "single_cpu")}
-    base.update(dirs)
-    return {k: {"direction": v, "value": "<實測值>"} for k, v in base.items()}
+def g0_sample(**states):
+    """
+    預設：有記憶體證據、無運算證據（→ PASS）。
+    ⛔ absent 不是反面證據，只有 present 才算證據。
+    """
+    base = {k: "present" for k in cg.MEMORY_EVIDENCE}
+    base.update({k: "absent" for k in cg.COMPUTE_EVIDENCE})
+    base.update(states)
+    return {k: {"state": v, "value": "<實測值>"} for k, v in base.items()}
+
+
+def mem_only(**states):
+    return g0_sample(**states)
+
+
+def cpu_only(**states):
+    """有運算證據、無記憶體證據（→ 不受理）。"""
+    base = {k: "absent" for k in cg.MEMORY_EVIDENCE}
+    base.update({"C1_single_process_saturating": "present",
+                 "C2_load_high_without_memory": "absent"})
+    base.update(states)
+    return {k: {"state": v, "value": "<實測值>"} for k, v in base.items()}
+
+
+def no_signal():
+    """兩種證據都沒有（閒置）。"""
+    base = {k: "absent" for k in list(cg.MEMORY_EVIDENCE) + list(cg.COMPUTE_EVIDENCE)}
+    return {k: {"state": v, "value": "<實測值>"} for k, v in base.items()}
 
 
 def meas(**over):
@@ -135,101 +158,92 @@ class TestBaselineIntersection(unittest.TestCase):
 class TestG0Axis(unittest.TestCase):
     def test_single_snapshot_is_blocked(self):
         """⛔ 不得用單一快照。"""
-        m = meas(g0_samples=[g0_sample()])
-        self.assertEqual(cg.gate_g0(m)["status"], cg.BLOCKED)
+        self.assertEqual(cg.gate_g0(meas(g0_samples=[mem_only()]))["status"], cg.BLOCKED)
 
-    def test_all_compute_is_rejected(self):
-        """裝置 B 那一類：四項一致指向運算 → 不受理。**這是負面對照的核心測試**。"""
-        s = g0_sample(swapouts="compute", memory_pressure="compute",
-                      ps_vs_pgrep="compute", single_cpu="compute")
-        g = cg.gate_g0(meas(g0_samples=[s, s]))
+    def test_compute_evidence_only_is_rejected(self):
+        """裝置 B 那一類：有運算的正面證據、無記憶體證據 → 不受理。"""
+        g = cg.gate_g0(meas(g0_samples=[cpu_only(), cpu_only()]))
         self.assertEqual(g["status"], cg.FAIL)
         self.assertEqual(g["verdict"], "不受理")
 
-    def test_contradictory_is_blocked_not_forced(self):
-        """⛔ 判據互相矛盾時不要硬判。"""
-        s = g0_sample(single_cpu="compute")
-        g = cg.gate_g0(meas(g0_samples=[s, s]))
-        self.assertEqual(g["status"], cg.BLOCKED)
-
-    def test_unlabelled_direction_is_blocked(self):
-        """每項判據都要明確標方向，缺標就停住 —— 不替分析者猜。"""
-        m = meas()
-        m["g0_samples"][0]["swapouts"] = {"value": "1993782"}   # 沒有 direction
-        self.assertEqual(cg.gate_g0(m)["status"], cg.BLOCKED)
-
-
-class TestG0RevisionOne(unittest.TestCase):
-    """
-    修訂 1（audit-standard.md 第十節）：`inconclusive` 的處置。
-
-    原規則要求「每一個取樣點都四項全 compute」，於是一個落在閒置時刻的取樣點
-    （突發 CPU 消耗者剛結束 → `single_cpu` 為 inconclusive）就把一個明確非記憶體的
-    案子打成「無法歸因」。四種情況現在窮盡且互斥。
-    """
-
-    def test_idle_sample_does_not_rescue_a_compute_bound_case(self):
-        """
-        情況 1：實地形態 —— 三個取樣點、12 個讀數，11 個 compute、0 個 memory，
-        其中一個取樣點的 single_cpu 是 inconclusive。必須判不受理。
-        """
-        s_busy = g0_sample(swapouts="compute", memory_pressure="compute",
-                           ps_vs_pgrep="compute", single_cpu="compute")
-        s_idle = g0_sample(swapouts="compute", memory_pressure="compute",
-                           ps_vs_pgrep="compute", single_cpu="inconclusive")
-        g = cg.gate_g0(meas(g0_samples=[s_busy, s_busy, s_idle]))
-        self.assertEqual(g["status"], cg.FAIL)
-        self.assertEqual(g["verdict"], "不受理")
-
-    def test_all_inconclusive_is_blocked_not_rejected(self):
-        """情況 3：完全沒有成形的訊號 → 停住並要求在有負載的時點重取，不是不受理。"""
-        s = g0_sample(swapouts="inconclusive", memory_pressure="inconclusive",
-                      ps_vs_pgrep="inconclusive", single_cpu="inconclusive")
-        g = cg.gate_g0(meas(g0_samples=[s, s]))
-        self.assertEqual(g["status"], cg.BLOCKED)
-        self.assertIn("重取", g["reason"])
-
-    def test_memory_in_one_sample_compute_in_another_is_blocked(self):
-        """情況 2：跨取樣點的矛盾也算矛盾 —— 不硬判。"""
-        s_mem = g0_sample()
-        s_cpu = g0_sample(swapouts="compute", memory_pressure="compute",
-                          ps_vs_pgrep="compute", single_cpu="compute")
-        g = cg.gate_g0(meas(g0_samples=[s_mem, s_cpu]))
-        self.assertEqual(g["status"], cg.BLOCKED)
-        self.assertIn("矛盾", g["reason"])
-
-    def test_memory_with_inconclusive_still_passes(self):
-        """情況 4：有記憶體證據、無運算證據 → 過。inconclusive 不擋。"""
-        s = g0_sample(single_cpu="inconclusive")
-        g = cg.gate_g0(meas(g0_samples=[s, s]))
+    def test_memory_evidence_only_passes(self):
+        g = cg.gate_g0(meas(g0_samples=[mem_only(), mem_only()]))
         self.assertEqual(g["status"], cg.PASS)
 
-    def test_revision_does_not_change_verdicts_for_memory_bound_machines(self):
-        """
-        ⛔ 修訂的驗收條件：**不得改變任何既有案子的結論**。
-        有判據指向記憶體的機器走情況 3／4，結果必須與修訂前相同（PASS）。
-        這條測試就是「這不是為了讓某台機器過關而裁剪」的機械證明。
-        """
-        for extra in ({}, {"single_cpu": "inconclusive"},
-                      {"ps_vs_pgrep": "inconclusive", "single_cpu": "inconclusive"}):
-            s = g0_sample(**extra)
-            with self.subTest(extra=extra):
-                self.assertEqual(cg.gate_g0(meas(g0_samples=[s, s]))["status"], cg.PASS)
+    def test_both_kinds_of_evidence_is_blocked(self):
+        """⛔ 兩種正面證據同時存在時不硬判。"""
+        g = cg.gate_g0(meas(g0_samples=[mem_only(), cpu_only(
+            **{k: "present" for k in cg.MEMORY_EVIDENCE})]))
+        self.assertEqual(g["status"], cg.BLOCKED)
+        self.assertIn("同時存在", g["reason"])
 
-    def test_revision_only_moves_verdicts_toward_rejection(self):
+    def test_no_evidence_at_all_is_blocked(self):
+        """閒置機器：兩種證據都沒有 → 停住，⛔ 不得讀成任一方的證據。"""
+        g = cg.gate_g0(meas(g0_samples=[no_signal(), no_signal()]))
+        self.assertEqual(g["status"], cg.BLOCKED)
+        self.assertIn("沒有成形的瓶頸", g["reason"])
+
+    def test_unlabelled_state_is_blocked(self):
+        """每一項都要標狀態，缺標就停住 —— 不替分析者猜。"""
+        m = meas()
+        m["g0_samples"][0]["M1_swapouts_rising"] = {"value": "1993782"}
+        self.assertEqual(cg.gate_g0(m)["status"], cg.BLOCKED)
+
+
+class TestG0RevisionThree(unittest.TestCase):
+    """
+    第三次預先登記：把「四項判據投票」改成「兩組正面證據」。
+
+    理由：原判據表的兩欄不對稱。`ps` 被截斷是記憶體壓力的正面證據，
+    `ps` 沒被截斷卻跟每一種狀態都相容（閒置／CPU 打滿／記憶體吃緊但未達截斷門檻），
+    鑑別力為零。把它標成「指向運算」是製造訊號。
+
+    ⚠️ 這次修訂的方向**有利於申請方**，所以不能拿方向當「不是裁剪」的證據。
+    以下測試守的是它的**論證**：absent 不得產生任何一方的證據。
+    """
+
+    def test_absence_of_memory_evidence_is_not_compute_evidence(self):
+        """核心論證：M 全 absent、C 也全 absent → 停住，不是不受理。"""
+        g = cg.gate_g0(meas(g0_samples=[no_signal(), no_signal()]))
+        self.assertEqual(g["status"], cg.BLOCKED)
+        self.assertEqual(g["compute_evidence_present"], [])
+
+    def test_absence_of_compute_evidence_is_not_memory_evidence(self):
+        """反向也要成立：C 全 absent 不會讓 M 憑空出現。"""
+        s = no_signal()
+        g = cg.gate_g0(meas(g0_samples=[s, s]))
+        self.assertEqual(g["memory_evidence_present"], [])
+
+    def test_ps_consistent_no_longer_manufactures_compute_evidence(self):
         """
-        修訂的方向性：它讓標準**更容易判不受理**，不是更容易受理。
-        原規則會把「無記憶體證據＋部分 inconclusive」判成 BLOCKED；
-        新規則判 FAIL。⛔ 沒有任何輸入從 FAIL／BLOCKED 變成 PASS。
+        裝置 A 的實地形態：M1／M3／M4 present、M2 absent（ps 未被截斷）、
+        C1／C2 absent（最高 42%）。舊結構判矛盾，新結構判過。
         """
-        s_busy = g0_sample(swapouts="compute", memory_pressure="compute",
-                           ps_vs_pgrep="compute", single_cpu="compute")
-        s_idle = g0_sample(swapouts="compute", memory_pressure="compute",
-                           ps_vs_pgrep="compute", single_cpu="inconclusive")
-        # 任何「無 memory 讀數」的組合都不可能是 PASS
-        for combo in ([s_busy, s_idle], [s_idle, s_idle], [s_busy, s_busy]):
-            with self.subTest(n_idle=sum(1 for x in combo if x is s_idle)):
-                self.assertNotEqual(cg.gate_g0(meas(g0_samples=combo))["status"], cg.PASS)
+        s = mem_only(M2_ps_truncated="absent")
+        g = cg.gate_g0(meas(g0_samples=[s, s, s]))
+        self.assertEqual(g["status"], cg.PASS)
+        self.assertNotIn("M2_ps_truncated", g["memory_evidence_present"])
+
+    def test_device_b_verdict_is_preserved_by_the_revision(self):
+        """
+        ⛔ 驗收條件：修訂**不得改變裝置 B 的結論**。
+        B 的形態是 C1 present（mediaanalysisd 230%）、記憶體證據全 absent，
+        且其中一個取樣點連 C1 都 absent（突發結束）→ 仍須判不受理。
+        """
+        busy = cpu_only()
+        idle = cpu_only(C1_single_process_saturating="absent")
+        g = cg.gate_g0(meas(g0_samples=[busy, busy, idle]))
+        self.assertEqual(g["status"], cg.FAIL)
+        self.assertEqual(g["verdict"], "不受理")
+
+    def test_unknown_never_becomes_evidence(self):
+        """量不到寫 unknown，而 unknown 不得被當成任一方的證據。"""
+        s = {k: {"state": "unknown", "value": "UNKNOWN"} for k in
+             list(cg.MEMORY_EVIDENCE) + list(cg.COMPUTE_EVIDENCE)}
+        g = cg.gate_g0(meas(g0_samples=[s, s]))
+        self.assertEqual(g["status"], cg.BLOCKED)
+        self.assertEqual(g["memory_evidence_present"], [])
+        self.assertEqual(g["compute_evidence_present"], [])
 
 
 class TestG1Exhaustion(unittest.TestCase):
@@ -334,9 +348,7 @@ class TestEndToEnd(unittest.TestCase):
 
     def test_stops_at_first_failing_gate_no_layer_skipping(self):
         """⛔ 不得跳層：停在第一道不過的閘門。"""
-        s = g0_sample(swapouts="compute", memory_pressure="compute",
-                      ps_vs_pgrep="compute", single_cpu="compute")
-        m = meas(g0_samples=[s, s], g1_l3_ab=[])      # G0 與 G1 都不過
+        m = meas(g0_samples=[cpu_only(), cpu_only()], g1_l3_ab=[])  # G0 與 G1 都不過
         res = cg.evaluate(decl(), m)
         self.assertEqual(res["stopped_at"], "G0")     # 停在 G0，不繼續評 G1
 
