@@ -341,16 +341,48 @@ def gate_g1(decl: dict, meas: dict) -> dict:
             else {"status": FAIL, "verdict": "不受理，退回該層", "problems": problems})
 
 
-def gate_g2(bl: dict, r: dict, meas: dict) -> dict:
-    """G2 缺口實在。交集為空、或降載無劣化，都不過。"""
+def unvalidatable_items(decl: dict, bl: dict) -> list[dict]:
+    """
+    宣告項自陳「G2 對本項不可驗」的清單，附它在基線裡的佔比。
+
+    ⛔ 不可驗**不等於**已驗證。第一次為真實機器跑 G2 時撞到：
+       使用者宣告「分頁即待辦佇列」，那一項既無可縮減量（工作集＝當下現況），
+       而「關掉分頁」的代價是**工作佇列遺失**，不是任務成功率下降 ——
+       已登記的劣化定義 A（任務成功率）**量不到那種代價**。
+       這時正確的處置是**指名它、算出它佔基線多少、讓 G2 停住**，
+       ⛔ 不得讓它默默算成已驗證。
+    """
+    counted = {c["name"]: c["mb"] for c in bl["counted"]}
+    total = bl["baseline_mb"] or 1
+    out = []
+    for d in decl.get("incompressible") or []:
+        u = d.get("g2_unvalidatable")
+        if u and d.get("name") in counted:
+            mb = counted[d["name"]]
+            out.append({"name": d["name"], "mb": mb,
+                        "share_of_baseline": round(mb / total * 100, 1),
+                        "reason": (u.get("reason") if isinstance(u, dict) else str(u))})
+    return sorted(out, key=lambda x: -x["mb"])
+
+
+def gate_g2(bl: dict, r: dict, meas: dict, decl: dict | None = None) -> dict:
+    """G2 缺口實在。交集為空、降載無劣化、或有不可驗項目，都不過。"""
+    unval = unvalidatable_items(decl or {}, bl)
     if bl["intersection_empty"]:
         return {"status": FAIL, "verdict": "不受理",
                 "reason": "宣告與實測 L4 的交集為空 → 沒有可提報的缺口"}
 
     dc = meas.get("downclock_experiment") or {}
     if dc.get("ran") is not True:
+        extra = ""
+        if unval:
+            share = round(sum(u["share_of_baseline"] for u in unval), 1)
+            extra = (f"；另有 {len(unval)} 項自陳不可驗（佔基線 {share}%），"
+                     "即使跑完降載實驗，那幾項仍不會被驗證")
         return {"status": BLOCKED,
-                "reason": "降載實驗尚未執行 → G2 不算過。⛔ 不得以「我覺得會很慢」代替"}
+                "reason": "降載實驗尚未執行 → G2 不算過。"
+                          "⛔ 不得以「我覺得會很慢」代替" + extra,
+                "unvalidatable": unval}
     tasks = dc.get("tasks") or []
     if len(tasks) < 10:
         return {"status": FAIL,
@@ -366,6 +398,14 @@ def gate_g2(bl: dict, r: dict, meas: dict) -> dict:
     if r.get("sigma") == UNDEFINED:
         notes.append("σ 為 UNDEFINED（swap 未配置）→ ⛔ 不得以 σ 支撐缺口，"
                      "改以 Swapouts 為主判據")
+    if unval:
+        share = round(sum(u["share_of_baseline"] for u in unval), 1)
+        return {"status": BLOCKED,
+                "reason": f"有 {len(unval)} 項自陳「G2 不可驗」，合計佔基線 {share}%。"
+                          "⛔ 不可驗不等於已驗證 —— 停在這裡，由審查者決定要不要"
+                          "接受未驗證的宣告，或改用能捕捉該項代價的劣化定義"
+                          "（那是新一次預先登記）",
+                "unvalidatable": unval, "notes": notes}
     return {"status": PASS, "reason": "缺口有降載實測支撐", "notes": notes}
 
 
@@ -445,7 +485,7 @@ def evaluate(decl: dict, meas: dict) -> dict:
     bl = baseline(decl, meas)
     r = ratios(decl, meas, bl["baseline_mb"])
     g = {"G0": gate_g0(meas), "G1": gate_g1(decl, meas),
-         "G2": gate_g2(bl, r, meas), "G3": gate_g3(decl, meas, bl["baseline_mb"])}
+         "G2": gate_g2(bl, r, meas, decl), "G3": gate_g3(decl, meas, bl["baseline_mb"])}
 
     order = ["G0", "G1", "G2", "G3"]
     stopped_at, verdict = None, None
@@ -491,6 +531,9 @@ def render(res: dict) -> str:
             a(f"      ⛔ {p}")
         for n in gg.get("notes", []):
             a(f"      ⚠️ {n}")
+        for u in gg.get("unvalidatable", []):
+            a(f"      🔴 不可驗：{u['name']} {u['mb']} MB（佔基線 {u['share_of_baseline']}%）")
+            a(f"         理由：{u['reason']}")
     a("")
     a("--- 無因次比值（提報用，不是及格線）---")
     for k, v in res["ratios"].items():

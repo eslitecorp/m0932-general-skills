@@ -481,6 +481,56 @@ class TestG2Gap(unittest.TestCase):
         self.assertTrue(any("UNDEFINED" in n for n in g["notes"]))
 
 
+class TestG2Unvalidatable(unittest.TestCase):
+    """
+    修訂 6：自陳「G2 不可驗」的項目。
+
+    撞到的形態：使用者宣告「分頁即待辦佇列」——那一項既無可縮減量
+    （工作集＝當下現況），而「關掉分頁」的代價是**工作佇列遺失**，
+    不是任務成功率下降，已登記的劣化定義 A 量不到那種代價。
+    ⛔ 不可驗**不等於**已驗證。
+    """
+
+    def _case(self, ran=True, degraded=True):
+        d = decl()
+        d["incompressible"] = [{
+            "name": "svc-a", "scales_with_concurrency": True, "per_unit_mb": 80,
+            "observation": "有在用", "shared_alternative_reason": "資料落地限制",
+            "non_resident_alternative": "無",
+            "g2_unvalidatable": {"reason": "關掉它的代價是佇列遺失，劣化定義 A 量不到"}}]
+        m = meas(downclock_experiment={"ran": ran, "degraded": degraded,
+                                       "tasks": [f"t{i}" for i in range(10)]},
+                 g1_l3_ab=[])
+        return d, m
+
+    def test_unvalidatable_item_blocks_g2_even_after_downclock(self):
+        """⛔ 降載實驗跑完且有劣化，仍不得讓不可驗項目默默算成已驗證。"""
+        d, m = self._case()
+        g = cg.gate_g2(cg.baseline(d, m), cg.ratios(d, m, 400), m, d)
+        self.assertEqual(g["status"], cg.BLOCKED)
+        self.assertEqual(len(g["unvalidatable"]), 1)
+        self.assertIn("不可驗不等於已驗證", g["reason"])
+
+    def test_unvalidatable_reports_share_of_baseline(self):
+        """審查者要看得到它佔基線多少 —— 那決定這個缺口有多少是未驗證的。"""
+        d, m = self._case()
+        g = cg.gate_g2(cg.baseline(d, m), cg.ratios(d, m, 400), m, d)
+        self.assertEqual(g["unvalidatable"][0]["share_of_baseline"], 100.0)
+
+    def test_unvalidatable_surfaced_even_before_downclock_runs(self):
+        """降載還沒跑時就要先講：跑完那幾項也不會被驗證。"""
+        d, m = self._case(ran=False, degraded=None)
+        g = cg.gate_g2(cg.baseline(d, m), cg.ratios(d, m, 400), m, d)
+        self.assertEqual(g["status"], cg.BLOCKED)
+        self.assertIn("仍不會被驗證", g["reason"])
+
+    def test_no_unvalidatable_still_passes(self):
+        """沒有不可驗項目時行為不變 —— 修訂不得改變既有案子的結論。"""
+        m = meas()
+        g = cg.gate_g2(cg.baseline(decl(), m), cg.ratios(decl(), m, 400), m, decl())
+        self.assertEqual(g["status"], cg.PASS)
+
+
 class TestG3Alternatives(unittest.TestCase):
     def test_upgradeable_machine_is_rejected(self):
         """可事後升級 → 不走第三層，走加購。"""
