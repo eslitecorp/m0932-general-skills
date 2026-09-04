@@ -365,34 +365,95 @@ def unvalidatable_items(decl: dict, bl: dict) -> list[dict]:
     return sorted(out, key=lambda x: -x["mb"])
 
 
+# 結構必要的三個合法 basis。⛔ 不得擴充成「我覺得很重要」——
+# 這三個的共同點是「拿掉它，宣告的工作在定義上就不存在了」。
+STRUCTURAL_BASES = {"作業系統", "強制合規", "宣告的工作負載本身"}
+
+
+def validation_rows(decl: dict, bl: dict) -> tuple[list, list, list]:
+    """
+    每個計入基線的項目都要有一列驗證紀錄，型別三選一（修訂 7）：
+
+    | 型別 | 要求的證據 | 適用 |
+    |---|---|---|
+    | downclock  | 降載實驗（既有路徑） | 預設 —— 沒填驗證的項目都落在這裡 |
+    | mechanism  | `mechanism`（平台自己拒絕回收的機制名）＋ `levers_exhausted`（試過的桿子清單） | 平台以保護狀態為由拒絕回收，例如 Chrome 的 form data 保護 |
+    | structural | `basis` ∈ 作業系統／強制合規／宣告的工作負載本身 | 拿掉它，宣告的工作在定義上就不存在 |
+
+    回傳 (待降載驗證的項目, 已驗證列, 格式問題)。
+    ⚠️ 這條修訂的方向有利於申請方（讓部分項目免跑降載實驗），
+    護欄是：每一列都要有指名的證據，而且「我宣告它重要」仍然不是任何一種型別。
+    """
+    # ⛔ 由 counted 驅動，不由宣告驅動 —— 否則宣告缺漏（或呼叫端漏傳 decl）時
+    #    pending 為空、G2 反而直接過：空宣告讓閘門變鬆，方向完全錯。
+    #    計入基線的每一項都必須找得到驗證；找不到一律進 pending（預設要降載實驗）。
+    declared = {d.get("name"): d for d in (decl.get("incompressible") or [])}
+    pending, rows, problems = [], [], []
+    for c in bl["counted"]:
+        name = c["name"]
+        v = (declared.get(name) or {}).get("g2_validation")
+        if not isinstance(v, dict):
+            pending.append(name)
+            continue
+        t = v.get("type")
+        if t == "mechanism":
+            if v.get("mechanism") and v.get("levers_exhausted"):
+                rows.append({"name": name, "type": t,
+                             "evidence": v["mechanism"],
+                             "levers": v["levers_exhausted"]})
+            else:
+                problems.append(f"「{name}」的機制級驗證缺 mechanism 或 "
+                                "levers_exhausted（試過哪些桿子要列出來）")
+        elif t == "structural":
+            if v.get("basis") in STRUCTURAL_BASES:
+                rows.append({"name": name, "type": t, "evidence": v["basis"]})
+            else:
+                problems.append(f"「{name}」的結構必要 basis「{v.get('basis')}」"
+                                f"不在 {sorted(STRUCTURAL_BASES)}")
+        elif t == "downclock":
+            pending.append(name)
+        else:
+            problems.append(f"「{name}」的驗證型別「{t}」"
+                            "不在 downclock／mechanism／structural")
+    return pending, rows, problems
+
+
 def gate_g2(bl: dict, r: dict, meas: dict, decl: dict | None = None) -> dict:
-    """G2 缺口實在。交集為空、降載無劣化、或有不可驗項目，都不過。"""
+    """G2 缺口實在。每個計入項都要有驗證；交集為空或有不可驗項目，都不過。"""
     unval = unvalidatable_items(decl or {}, bl)
     if bl["intersection_empty"]:
         return {"status": FAIL, "verdict": "不受理",
                 "reason": "宣告與實測 L4 的交集為空 → 沒有可提報的缺口"}
 
-    dc = meas.get("downclock_experiment") or {}
-    if dc.get("ran") is not True:
-        extra = ""
-        if unval:
-            share = round(sum(u["share_of_baseline"] for u in unval), 1)
-            extra = (f"；另有 {len(unval)} 項自陳不可驗（佔基線 {share}%），"
-                     "即使跑完降載實驗，那幾項仍不會被驗證")
-        return {"status": BLOCKED,
-                "reason": "降載實驗尚未執行 → G2 不算過。"
-                          "⛔ 不得以「我覺得會很慢」代替" + extra,
+    pending, vrows, problems = validation_rows(decl or {}, bl)
+    if problems:
+        return {"status": FAIL, "verdict": "不受理", "problems": problems,
                 "unvalidatable": unval}
-    tasks = dc.get("tasks") or []
-    if len(tasks) < 10:
-        return {"status": FAIL,
-                "reason": f"降載實驗只有 {len(tasks)} 個任務，未達 ≥10 個近期真實任務"}
-    if dc.get("degraded") is False:
-        return {"status": FAIL, "verdict": "L4 分類錯誤，退回第一層",
-                "reason": "降載實驗無劣化 → 那些項目其實不是 L4。"
-                          "⛔ 不得解釋成「任務集不夠難」再重挑任務集"}
-    if dc.get("degraded") is not True:
-        return {"status": BLOCKED, "reason": "降載實驗的劣化判定是 UNKNOWN"}
+
+    dc = meas.get("downclock_experiment") or {}
+    if pending:
+        if dc.get("ran") is not True:
+            extra = ""
+            if unval:
+                share = round(sum(u["share_of_baseline"] for u in unval), 1)
+                extra = (f"；另有 {len(unval)} 項自陳不可驗（佔基線 {share}%），"
+                         "即使跑完降載實驗，那幾項仍不會被驗證")
+            return {"status": BLOCKED,
+                    "reason": f"這些項目仍待降載實驗：{pending} → G2 不算過。"
+                              "⛔ 不得以「我覺得會很慢」代替" + extra,
+                    "pending_downclock": pending, "validated": vrows,
+                    "unvalidatable": unval}
+        tasks = dc.get("tasks") or []
+        if len(tasks) < 10:
+            return {"status": FAIL,
+                    "reason": f"降載實驗只有 {len(tasks)} 個任務，"
+                              "未達 ≥10 個近期真實任務"}
+        if dc.get("degraded") is False:
+            return {"status": FAIL, "verdict": "L4 分類錯誤，退回第一層",
+                    "reason": "降載實驗無劣化 → 那些項目其實不是 L4。"
+                              "⛔ 不得解釋成「任務集不夠難」再重挑任務集"}
+        if dc.get("degraded") is not True:
+            return {"status": BLOCKED, "reason": "降載實驗的劣化判定是 UNKNOWN"}
 
     notes = []
     if r.get("sigma") == UNDEFINED:
@@ -406,7 +467,11 @@ def gate_g2(bl: dict, r: dict, meas: dict, decl: dict | None = None) -> dict:
                           "接受未驗證的宣告，或改用能捕捉該項代價的劣化定義"
                           "（那是新一次預先登記）",
                 "unvalidatable": unval, "notes": notes}
-    return {"status": PASS, "reason": "缺口有降載實測支撐", "notes": notes}
+    if not pending:
+        notes.append("⚠️ 本案沒有走降載實驗的項目 —— 全部由機制級／結構必要驗證覆蓋。"
+                     "這條路比行為實驗寬（修訂 7 的方向揭露），每列證據都在 validated 裡")
+    return {"status": PASS, "reason": "每個計入項都有驗證紀錄",
+            "validated": vrows, "notes": notes}
 
 
 def gate_g3(decl: dict, meas: dict, baseline_mb=None) -> dict:
@@ -531,6 +596,8 @@ def render(res: dict) -> str:
             a(f"      ⛔ {p}")
         for n in gg.get("notes", []):
             a(f"      ⚠️ {n}")
+        for v in gg.get("validated", []):
+            a(f"      ✅ 已驗證：{v['name']}（{v['type']}）— {v['evidence']}")
         for u in gg.get("unvalidatable", []):
             a(f"      🔴 不可驗：{u['name']} {u['mb']} MB（佔基線 {u['share_of_baseline']}%）")
             a(f"         理由：{u['reason']}")

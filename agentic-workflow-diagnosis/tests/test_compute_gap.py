@@ -531,6 +531,71 @@ class TestG2Unvalidatable(unittest.TestCase):
         self.assertEqual(g["status"], cg.PASS)
 
 
+class TestG2ValidationTypology(unittest.TestCase):
+    """
+    修訂 7：G2 的驗證型別三分（downclock／mechanism／structural）。
+    ⚠️ 方向有利於申請方 —— 護欄是每列都要指名證據，且由 counted 驅動。
+    """
+
+    def _decl_with(self, validation):
+        d = decl()
+        d["incompressible"][0]["g2_validation"] = validation
+        return d
+
+    def _no_downclock(self):
+        return meas(downclock_experiment={"ran": False, "tasks": [], "degraded": None})
+
+    def _g2(self, d, m):
+        return cg.gate_g2(cg.baseline(d, m), cg.ratios(d, m, 400), m, d)
+
+    def test_mechanism_validation_passes_without_downclock(self):
+        d = self._decl_with({"type": "mechanism",
+                             "mechanism": "Chrome form data 保護 —— 平台拒絕回收以保護未存狀態",
+                             "levers_exhausted": ["Memory Saver 已 Maximum", "手動 Urgent Discard 被擋"]})
+        g = self._g2(d, self._no_downclock())
+        self.assertEqual(g["status"], cg.PASS)
+        self.assertTrue(any("寬" in n for n in g["notes"]))   # 方向揭露必須出現
+
+    def test_mechanism_without_levers_fails(self):
+        """⛔ 只說有機制、不列試過的桿子 → 不過。"""
+        d = self._decl_with({"type": "mechanism", "mechanism": "某保護"})
+        g = self._g2(d, self._no_downclock())
+        self.assertEqual(g["status"], cg.FAIL)
+
+    def test_structural_needs_a_legal_basis(self):
+        """⛔ 「我覺得很重要」不是結構必要。"""
+        d = self._decl_with({"type": "structural", "basis": "我覺得很重要"})
+        g = self._g2(d, self._no_downclock())
+        self.assertEqual(g["status"], cg.FAIL)
+        d2 = self._decl_with({"type": "structural", "basis": "作業系統"})
+        self.assertEqual(self._g2(d2, self._no_downclock())["status"], cg.PASS)
+
+    def test_counted_item_missing_from_decl_still_needs_downclock(self):
+        """⛔ 語意漏洞回歸測試：decl 缺漏不得讓閘門變鬆。"""
+        d = decl()
+        g = cg.gate_g2(cg.baseline(d, self._no_downclock()),
+                       cg.ratios(d, self._no_downclock(), 400),
+                       self._no_downclock(), None)     # 呼叫端漏傳 decl
+        self.assertEqual(g["status"], cg.BLOCKED)
+        self.assertIn("svc-a", str(g.get("pending_downclock") or g["reason"]))
+
+    def test_mixed_pending_still_requires_downclock(self):
+        """一項有驗證、另一項沒有 → 沒有的那項仍擋住 G2，並被指名。"""
+        d = decl()
+        d["incompressible"] = [
+            dict(d["incompressible"][0],
+                 g2_validation={"type": "structural", "basis": "作業系統"}),
+            {"name": "svc-b", "observation": "有在用",
+             "shared_alternative_reason": "資料落地限制",
+             "non_resident_alternative": "無"}]
+        m = self._no_downclock()
+        m["attribution"].append({"name": "svc-b", "layer": "L4", "footprint_mb": 100})
+        m["g1_l3_ab"] = []
+        g = self._g2(d, m)
+        self.assertEqual(g["status"], cg.BLOCKED)
+        self.assertIn("svc-b", str(g["pending_downclock"]))
+
+
 class TestG3Alternatives(unittest.TestCase):
     def test_upgradeable_machine_is_rejected(self):
         """可事後升級 → 不走第三層，走加購。"""
