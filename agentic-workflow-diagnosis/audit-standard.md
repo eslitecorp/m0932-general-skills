@@ -199,7 +199,7 @@ R = 應然基線 / 實體容量
 
 | 項目 | 規定 |
 |---|---|
-| **任務集** | `scripts/select_task_set.py --n 10 --days 30 --json > downclock-task-set.json`。規則化、決定性（重跑必得同一份），只輸出 session id／工具名／計數／時間。⛔ 不足 n 個時**不得放寬 `--days` 或降低 `--n` 來湊數** —— 那會把規則化挑選變成挑符合條件的樣本 |
+| **任務集** | `scripts/select_task_set.py --n 10 --days 30 --exclude-current --json > downclock-task-set.json`。規則化、決定性（重跑必得同一份），只輸出 session id／工具名／計數／時間。⛔ 不足 n 個時**不得放寬 `--days` 或降低 `--n` 來湊數** —— 那會把規則化挑選變成挑符合條件的樣本 |
 | **降載方式** | `scripts/downclock_ballast.sh --ceiling <GB> --confirm`。壓法與**實際配置到的量**要登記（配置量可能小於目標，腳本會印出來） |
 | **對照** | 同一組任務在正常條件下先跑一輪當基線 |
 | **劣化定義** | **預先登記，事後不得改**。三種可選其一，登記在宣告裡 |
