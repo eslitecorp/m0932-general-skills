@@ -164,7 +164,7 @@ class TestG0Axis(unittest.TestCase):
         self.assertEqual(cg.gate_g0(meas(g0_samples=[mem_only()]))["status"], cg.BLOCKED)
 
     def test_compute_evidence_only_is_rejected(self):
-        """裝置 B 那一類：有運算的正面證據、無記憶體證據 → 不受理。"""
+        """已實地遇過的那一類：有運算的正面證據、無記憶體證據 → 不受理。"""
         g = cg.gate_g0(meas(g0_samples=[cpu_only(), cpu_only()]))
         self.assertEqual(g["status"], cg.FAIL)
         self.assertEqual(g["verdict"], "不受理")
@@ -219,7 +219,7 @@ class TestG0RevisionThree(unittest.TestCase):
 
     def test_ps_consistent_no_longer_manufactures_compute_evidence(self):
         """
-        裝置 A 的實地形態：M1／M3／M4 present、M2 absent（ps 未被截斷）、
+        某台重負載機的實地形態：M1／M3／M4 present、M2 absent（ps 未被截斷）、
         C1／C2 absent（最高 42%）。舊結構判矛盾，新結構判過。
         """
         s = mem_only(M2_ps_truncated="absent")
@@ -229,7 +229,7 @@ class TestG0RevisionThree(unittest.TestCase):
 
     def test_device_b_verdict_is_preserved_by_the_revision(self):
         """
-        ⛔ 驗收條件：修訂**不得改變裝置 B 的結論**。
+        ⛔ 驗收條件：修訂**不得改變「只有運算證據」那一類的結論**。
         B 的形態是 C1 present（mediaanalysisd 230%）、記憶體證據全 absent，
         且其中一個取樣點連 C1 都 absent（突發結束）→ 仍須判不受理。
         """
@@ -659,7 +659,7 @@ class TestEndToEnd(unittest.TestCase):
 
     def test_no_numeric_threshold_leaked_into_the_code(self):
         """
-        ⛔ 標準不得內建跨裝置數值門檻（C1；n = 2）。
+        ⛔ 標準不得內建跨裝置數值門檻（C1）。
         R 只是提報用的量，不能有及格線 —— 所以同一份輸入把 R 拉高十倍，
         結論不應該改變。
         """

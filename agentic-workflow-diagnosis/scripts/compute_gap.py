@@ -10,8 +10,8 @@
 
 三條設計約束，改動時不要違反：
 
-1. ⛔ **不內建任何數值門檻。** `portability.md` 的 C1（門檻自引）＋裝置 profile `n = 2`
-   使得跨裝置門檻算不出來。所以本腳本只檢查**證據的形狀與組合邏輯**：
+1. ⛔ **不內建任何數值門檻。** `portability.md` 的 C1（門檻自引）使得跨裝置門檻算不出來，
+   且本 skill 刻意不維護裝置台帳去累積樣本。所以本腳本只檢查**證據的形狀與組合邏輯**：
    每項判據的方向（指向記憶體／指向運算）由分析者明確標注並附值，
    腳本驗證的是「有沒有這一類證據」與「四項怎麼組合」，不是「數字超過多少」。
    唯一允許的數值來自提案者自己的宣告，且一律標成 declared。
@@ -574,7 +574,7 @@ def evaluate(decl: dict, meas: dict) -> dict:
             "task_set_rule": decl.get("task_set_rule", UNKNOWN),
             "ram_upgradeable": (decl.get("machine") or {}).get("ram_upgradeable", UNKNOWN),
         },
-        "_note": "門檻是證據要求不是數值（portability.md C1；裝置 profile n = 2）。"
+        "_note": "門檻是證據要求不是數值（portability.md C1）。"
                  "declared 欄位是提案者的宣告，不是校準過的門檻。",
     }
 
