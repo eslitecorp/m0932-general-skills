@@ -177,7 +177,7 @@ fp=$(vmmap --summary "$pid" 2>/dev/null | awk -F: '/Physical footprint:/{gsub(/ 
 ⛔ **不得以現值作為需求基準** —— 現值可能已經包含該被刪掉的浪費。
 ⛔ **不得跳層**：L4 的主張，只有在 L1–L3 全部處理完並複測之後才被受理。
 
-### L1 的五條
+### L1 的六條
 
 - **必須修成因，不得以「已手動清除」結案**
   〔事證：某機的容器化 MCP server，其孤兒回收條件是「host 上完全沒有任何活著的 client」。
@@ -192,6 +192,23 @@ fp=$(vmmap --summary "$pid" 2>/dev/null | awk -F: '/Physical footprint:/{gsub(/ 
   但實測對應環境變數在 launchd 設定與所有 shell 設定檔中**都不存在**，仍走預設值〕
 - **必須逐項清查同一能力的重複定義**
   〔事證：某機有兩個服務各被定義兩次（一次 stdio、一次 http），那是設定衝突而非兩套並用〕
+- ⛔ **重複定義不會只以「同名多份」的形狀出現，四種都要查** ——
+  只查一種會同時漏掉其他三種，而漏掉的通常比查到的貴：
+  - **同名、多份設定檔**：最容易查，也最少見
+  - **不同名、同一支實作**：名字不同所以按名字比對查不到
+    〔事證：某機的 `codebase-memory` 與 `codebase-memory-mcp` 是兩個名字、
+    同一支 binary → 每個 session 起兩個 server，**兩個 writer 寫同一批 SQLite**〕
+  - **同一支腳本被手動設定與 plugin 各註冊一次**：只讀 `settings*.json` 看不到，
+    plugin 自己的 `plugin.json` 也註冊 hook，兩邊都會觸發
+    〔事證：某機的 caveman `activate`／`tracker` 兩支（檔案 byte-identical）
+    被 `settings.json` 與 plugin 各註冊一次 → **每個 prompt 注入兩份 context**。
+    成本不在記憶體，在每一次對話〕
+  - **同一份能力被兩套安裝機制各裝一次**
+    〔事證：某機的 7 個 skill 同時來自 plugin 與 `install.sh` 的專案內副本，
+    上游同一個 repo → skill listing 每一項出現兩次〕
+  - ⛔ **反面也要守住：不同 matcher／不同事件下的同一命令不是重複**，是刻意的事件覆蓋。
+    把它報成重複就是製造一個假的 L1〔事證：同一台的 `cbm-session-reminder` 掛在
+    `startup`／`resume`／`clear`／`compact` 四個 matcher，被誤報成「重複 4 次」〕
 - **必須把「錯誤設定造成的額外佔用」列為 L1，即使其宿主是 L3 或 L4**
 
 ### L3 的兩條
@@ -244,7 +261,7 @@ MCP 設定去重與 stdio→http 收斂、容器自動清理條件、
 | **陷阱六**（受保護 process 拿不到 footprint） | ✅ **已實地驗證**（裝置 B），且該 process 正是全機最大消耗者 |
 | 平台範圍 macOS | ✅ 兩台都是 macOS ｜ ⚠️ **Linux／Windows 完全未驗證，手邊無裝置**。不寫成支援 |
 | `σ` 在 swap 未配置時 UNDEFINED | ✅ 實測（裝置 B：`vm.swapusage` total = 0.00M） |
-| L1 的五條 | ✅ 有實地事證。裝置 B 另外貢獻兩類：**同一能力在多份設定檔重複定義**（實際起了多個 process）、**hook 重複定義**（成本在每個 session 的 context 而非記憶體） |
+| L1 的六條 | ✅ 有實地事證。裝置 B 貢獻兩類：**同一能力在多份設定檔重複定義**（實際起了多個 process）、**hook 重複定義**（成本在每個 session 的 context 而非記憶體）｜**另一台再貢獻三類並修正一類**：不同名指向同一支實作（兩個 writer 寫同一批 SQLite）、同一支腳本被手動設定與 plugin 各註冊一次（每個 prompt 兩份 context）、同一份能力被兩套安裝機制各裝一次；⛔ 並否證了「同一命令出現 N 次即重複」——不同 matcher 是事件覆蓋，`probe_host.sh` 據此誤報過一次（`portability.md` A5） |
 | 四層歸因的**分類一致性**（兩個人分會不會分到同一層） | ⚠️ **仍未驗證**。裝置 B 也只有一個人分過一次，且未分完全機（只採樣 61／758 個 process） |
 | A/B 四欄實測 | ⚠️ **仍未實作過**。條文是設計，還沒有真正跑過一次 L3 的 A/B |
 | 症狀對照表的前兩列 | ✅ 有實地事證。**第二列在裝置 B 被完整走過一次**（運算瓶頸，本 skill 第一個「不受理」實例） ｜ 其餘 ⚠️ 推論，待累積 |

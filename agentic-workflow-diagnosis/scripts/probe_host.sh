@@ -77,20 +77,32 @@ top -l 2 -o cpu -n 8 -stats pid,cpu,mem,command 2>/dev/null \
   | awk '/^PID/{n++} n==2'
 
 # ── MCP 設定重複 ─────────────────────────────────────────────
+# ⛔ 兩種重複要分開報，只查其中一種會漏掉另一種：
+#    1. 同名被多份設定檔各定義一次（設定衝突）
+#    2. 不同名字指向同一支 binary（同能力兩份，名字不同所以第 1 種查不到）
+#    〔事證：某機的 codebase-memory 與 codebase-memory-mcp 是不同名字、同一支
+#     /Users/…/.local/bin/codebase-memory-mcp，每個 session 因此起兩個 server、
+#     兩個 writer 寫同一批 SQLite。只比名字的版本回報「無重複」〕
 sec "MCP 設定去重"
 python3 - "$CLAUDE_DIR" <<'PY'
 import json, pathlib, sys, collections
 claude_dir = pathlib.Path(sys.argv[1])
 seen = collections.Counter()
 where = collections.defaultdict(list)
+impl = collections.defaultdict(set)   # (command, args) -> {server 名}
 
 def harvest(obj, origin, path="<root>"):
     if isinstance(obj, dict):
         ms = obj.get("mcpServers")
         if isinstance(ms, dict):
-            for name in ms:
+            for name, spec in ms.items():
                 seen[name] += 1
                 where[name].append(f"{origin}:{path}")
+                if isinstance(spec, dict):
+                    cmd = spec.get("command")
+                    args = spec.get("args") or []
+                    if cmd and isinstance(args, list):
+                        impl[(cmd, tuple(str(a) for a in args))].add(name)
         for k, v in obj.items():
             if isinstance(v, (dict, list)) and k != "mcpServers":
                 harvest(v, origin, k)
@@ -105,10 +117,14 @@ for p in (pathlib.Path.home() / ".claude.json", claude_dir / ".mcp.json"):
         continue
 
 dupes = {n: c for n, c in seen.items() if c > 1}
-print(f"server 總數={len(seen)} 重複定義={len(dupes)}")
+aliases = {k: v for k, v in impl.items() if len(v) > 1}
+print(f"server 總數={len(seen)} 同名重複={len(dupes)} 同實作不同名={len(aliases)}")
 for n, c in sorted(dupes.items()):
     print(f"  ⚠️ {n} 被定義 {c} 次 → {', '.join(where[n])}")
-if not dupes:
+for (cmd, args), names in sorted(aliases.items(), key=lambda kv: sorted(kv[1])):
+    shown = cmd if not args else cmd + " " + " ".join(args)
+    print(f"  ⚠️ {', '.join(sorted(names))} 指向同一支實作 → {shown}")
+if not dupes and not aliases:
     print("  無重複定義")
 PY
 
@@ -122,11 +138,37 @@ echo "容器（docker/colima/podman）=$(pgrep -f 'docker|colima|podman' | wc -l
 
 # ── hook 重複定義 ────────────────────────────────────────────
 # 成本不在記憶體，在每個 session 的 context —— 同一段提示被注入 N 次。
+#
+# ⛔ 去重的 key 必須含 matcher。同一命令掛在不同 matcher 上是**事件覆蓋**，不是重複。
+#    〔事證：某機 cbm-session-reminder 掛在 startup／resume／clear／compact 四個
+#     matcher（腳本註解自己寫明是刻意的），只比 command 的版本判成「重複 4 次」——
+#     誤報，而且誤報的同時漏掉了下面那個真的〕
+#
+# ⛔ 只讀 settings*.json 讀不到真正最貴的那一類：**同一支腳本被手動設定與
+#    enabled plugin 各註冊一次**。plugin 自己的 plugin.json 也註冊 hook，兩邊都會觸發。
+#    〔事證：同一台機器上 caveman 的 activate／tracker 兩支腳本，settings.json 與
+#     plugin caveman@caveman 各註冊一次（檔案 byte-identical）→ 每個 prompt 注入兩份〕
+#    比對用腳本檔名，不用命令字串 —— plugin 走 ${CLAUDE_PLUGIN_ROOT}/…、
+#    手動設定走絕對路徑，字串不同但是同一支。
 sec "hook 重複定義"
 python3 - "$CLAUDE_DIR" <<'PY'
-import json, pathlib, sys, collections
+import json, pathlib, re, sys, collections
 claude_dir = pathlib.Path(sys.argv[1])
+
+SCRIPT_RE = re.compile(r"\.(js|mjs|cjs|ts|sh|bash|py)$")
+
+def script_ids(cmd):
+    """從 hook 命令抽出腳本身分（檔名）。抽不到就回空集合，不猜。"""
+    out = set()
+    for tok in re.findall(r"""[^\s"']+""", cmd or ""):
+        base = tok.rstrip("\"'").rsplit("/", 1)[-1]
+        if SCRIPT_RE.search(base):
+            out.add(base)
+    return out
+
 found = False
+declared = collections.defaultdict(list)   # 腳本檔名 -> settings 側來源
+
 for name in ("settings.json", "settings.local.json"):
     p = claude_dir / name
     try:
@@ -139,13 +181,69 @@ for name in ("settings.json", "settings.local.json"):
     for event, matchers in hooks.items():
         if not isinstance(matchers, list):
             continue
-        cmds = [h.get("command") for m in matchers
-                if isinstance(m, dict)
-                for h in m.get("hooks", []) if isinstance(h, dict)]
-        for cmd, n in collections.Counter(c for c in cmds if c).items():
+        # key 含 matcher：同 matcher 下才算重複
+        seen = collections.Counter()
+        for m in matchers:
+            if not isinstance(m, dict):
+                continue
+            mt = m.get("matcher")
+            for h in m.get("hooks", []):
+                if not isinstance(h, dict):
+                    continue
+                cmd = h.get("command")
+                if not cmd:
+                    continue
+                seen[(mt, cmd)] += 1
+                for sid in script_ids(cmd):
+                    label = f"{name}:{event}" + (f"[{mt}]" if mt else "")
+                    declared[sid].append(label)
+        for (mt, cmd), n in seen.items():
             if n > 1:
                 found = True
-                print(f"  ⚠️ {name} {event}：同一命令重複 {n} 次 → {cmd}")
+                shown = f"matcher={mt}" if mt else "無 matcher"
+                print(f"  ⚠️ {name} {event}（{shown}）：同一命令重複 {n} 次 → {cmd}")
+
+# enabled plugin 也註冊 hook —— 與 settings 側交叉比對
+plugin_declared = collections.defaultdict(list)
+try:
+    root_cfg = json.loads((claude_dir / "settings.json").read_text(encoding="utf-8"))
+    enabled = {k for k, v in (root_cfg.get("enabledPlugins") or {}).items() if v}
+except (OSError, json.JSONDecodeError):
+    enabled = set()
+try:
+    installed = json.loads(
+        (claude_dir / "plugins" / "installed_plugins.json").read_text(encoding="utf-8")
+    ).get("plugins") or {}
+except (OSError, json.JSONDecodeError):
+    installed = {}
+
+for key in sorted(enabled):
+    for entry in installed.get(key) or []:
+        ip = entry.get("installPath")
+        if not ip:
+            continue
+        pj = pathlib.Path(ip) / ".claude-plugin" / "plugin.json"
+        try:
+            spec = json.loads(pj.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        for event, matchers in (spec.get("hooks") or {}).items():
+            if not isinstance(matchers, list):
+                continue
+            for m in matchers:
+                if not isinstance(m, dict):
+                    continue
+                for h in m.get("hooks", []):
+                    if isinstance(h, dict):
+                        for sid in script_ids(h.get("command")):
+                            plugin_declared[sid].append(f"plugin {key}:{event}")
+
+for sid in sorted(set(declared) & set(plugin_declared)):
+    found = True
+    srcs = ", ".join(declared[sid] + plugin_declared[sid])
+    print(f"  ⚠️ {sid} 被手動設定與 plugin 各註冊一次 → {srcs}")
+    print(f"     成本在每個 session／每個 prompt 各注入一份重複 context")
+
 if not found:
     print("  無重複定義")
 PY
