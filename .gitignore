@@ -9,6 +9,9 @@ credentials.*
 # Cortex Cloud API Key 操作說明（含內部 URL，不對外公開）
 .github/CORTEX_API_KEY_SETUP.md
 
+# CI 產物（scripts/validate_skill.py 在 CI 與本機都會產生）
+validation_result.txt
+
 # Python
 venv/
 __pycache__/
