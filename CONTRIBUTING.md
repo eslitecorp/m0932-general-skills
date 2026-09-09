@@ -10,11 +10,11 @@ Skill 會影響團隊日常開發流程與輸出品質，因此任何新增或�
 
 ```mermaid
 flowchart TD
-    A([你有需求或發現問題]) --> B[開 GitHub Issue\n使用 skill-proposal template]
-    B --> C[維護者檢閱 Issue\n討論方向、影響範圍、替代方案]
+    A([你有需求或發現問題]) --> B[開 GitHub Issue<br>使用 skill-proposal template]
+    B --> C[維護者檢閱 Issue<br>討論方向、影響範圍、替代方案]
     C --> D{維護者決定由誰實作}
     D -->|維護者自行實作| E[維護者開發並送 PR]
-    D -->|邀請你貢獻| F[依共識實作\n送出 PR，連回 Issue]
+    D -->|邀請你貢獻| F[依共識實作<br>送出 PR，連回 Issue]
     E --> G[PR Review]
     F --> G
     G --> H{與 Issue 共識一致？}
