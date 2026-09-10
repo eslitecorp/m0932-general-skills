@@ -79,6 +79,27 @@ jobs:
           sarif_file: results-iac.sarif
           category: checkov-iac
 
+  # ── Skill 單元測試 ──────────────────────────────────────────────
+  # 目的：skill 內附腳本的回歸測試。每個 case 對應一類已知的跨裝置失效，
+  #       確保「在我機器上跑得動」不會被誤當成「到處都跑得動」。
+  # 觸發：PR + push to main
+  # 註：刻意只用 stdlib unittest，不裝任何第三方套件 ——
+  #     新增 requirements.txt 會連帶要求更新 dependabot.yml（見 validate_skill.py
+  #     的 check_dependabot_coverage），而這些測試不需要第三方依賴。
+  # 註：本 job 跑在 Linux，只覆蓋純 Python 的解析／指標層。
+  #     agentic-workflow-diagnosis 的環境層是 macOS 專有指令，在此無法驗證。
+  skill-tests:
+    name: Skill Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: agentic-workflow-diagnosis 回歸測試
+        run: python3 -m unittest discover agentic-workflow-diagnosis/tests -v
+
   # ── Skill 內容驗證 ──────────────────────────────────────────────
   # 目的：
   #   1. frontmatter schema 合規（name / description / tags）

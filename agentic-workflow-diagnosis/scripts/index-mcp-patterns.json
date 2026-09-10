@@ -1,0 +1,4 @@
+{
+  "_comment": "索引型 MCP 的名稱樣式。scan_sessions.py 以子字串比對工具名（mcp__<server>__<tool>）。預設清單在 scan_sessions.py 的 DEFAULT_INDEX_MCP_PATTERNS，本檔是「擴充」不是「取代」。你的機器用的索引工具不在預設清單裡時，把名稱片段加進 patterns —— 不加的話 index_use 會是 UNKNOWN（不是 0），指標 1 的硬旗標不會成立。",
+  "patterns": []
+}

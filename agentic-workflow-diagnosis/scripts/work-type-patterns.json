@@ -1,0 +1,4 @@
+{
+  "_comment": "工作型態的工具名子字串擴充。select_task_set.py 以子字串比對工具名（mcp__<server>__<tool> 或內建工具名）。本檔是「擴充」不是「取代」。⛔ 不要在這裡寫完整的 MCP server 名稱或 connector UUID —— 那正是 portability.md 的 A1（換機器就靜默失效）。寫操作層的字串，例如 \"merge_request\" 而不是 \"mcp__gitlab__get_merge_request\"。",
+  "work_types": {}
+}
