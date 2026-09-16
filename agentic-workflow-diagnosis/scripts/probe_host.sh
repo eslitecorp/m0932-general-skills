@@ -80,6 +80,12 @@ top -l 2 -o cpu -n 8 -stats pid,cpu,mem,command 2>/dev/null \
 # ⛔ 兩種重複要分開報，只查其中一種會漏掉另一種：
 #    1. 同名被多份設定檔各定義一次（設定衝突）
 #    2. 不同名字指向同一支 binary（同能力兩份，名字不同所以第 1 種查不到）
+#
+# ⛔ 去重的 key 必須含 **scope**（全域／哪一個專案）。同名出現在兩個不同專案層是
+#    **載入範圍收斂**，不是重複 —— 一個 session 只有一個 cwd，兩者不會同時載入。
+#    〔事證：依 SKILL.md 複測表把一個 MCP 從全域收斂到兩個專案層之後，本檢查
+#     立刻回報「被定義 2 次」。照 skill 的建議做，skill 自己的 probe 就誤報〕
+#    這與 hook 那邊「同一命令掛不同 matcher 是事件覆蓋」是同一個 A5 形態。
 #    〔事證：某機的 codebase-memory 與 codebase-memory-mcp 是不同名字、同一支
 #     /Users/…/.local/bin/codebase-memory-mcp，每個 session 因此起兩個 server、
 #     兩個 writer 寫同一批 SQLite。只比名字的版本回報「無重複」〕
@@ -87,7 +93,8 @@ sec "MCP 設定去重"
 python3 - "$CLAUDE_DIR" <<'PY'
 import json, pathlib, sys, collections
 claude_dir = pathlib.Path(sys.argv[1])
-seen = collections.Counter()
+seen = collections.Counter()          # (server 名, scope) -> 次數
+scopes = collections.defaultdict(set)  # server 名 -> {scope}
 where = collections.defaultdict(list)
 impl = collections.defaultdict(set)   # (command, args) -> {server 名}
 
@@ -96,7 +103,8 @@ def harvest(obj, origin, path="<root>"):
         ms = obj.get("mcpServers")
         if isinstance(ms, dict):
             for name, spec in ms.items():
-                seen[name] += 1
+                seen[(name, path)] += 1
+                scopes[name].add(path)
                 where[name].append(f"{origin}:{path}")
                 if isinstance(spec, dict):
                     cmd = spec.get("command")
@@ -116,15 +124,24 @@ for p in (pathlib.Path.home() / ".claude.json", claude_dir / ".mcp.json"):
     except (OSError, json.JSONDecodeError):
         continue
 
-dupes = {n: c for n, c in seen.items() if c > 1}
+# 真重複＝同一個 scope 內同名被定義多次
+dupes = {ns: c for ns, c in seen.items() if c > 1}
+# 全域與專案層都有 → 覆寫關係，值得提醒但不是雙載
+shadowed = {n: sc for n, sc in scopes.items() if len(sc) > 1 and "<root>" in sc}
+# 只出現在多個專案層 → 載入範圍收斂，⛔ 不是重複，不報
 aliases = {k: v for k, v in impl.items() if len(v) > 1}
-print(f"server 總數={len(seen)} 同名重複={len(dupes)} 同實作不同名={len(aliases)}")
-for n, c in sorted(dupes.items()):
-    print(f"  ⚠️ {n} 被定義 {c} 次 → {', '.join(where[n])}")
-for (cmd, args), names in sorted(aliases.items(), key=lambda kv: sorted(kv[1])):
+names = {n for n, _ in seen}
+print(f"server 總數={len(names)} 同名重複={len(dupes)} "
+      f"全域被專案層覆寫={len(shadowed)} 同實作不同名={len(aliases)}")
+for (n, sc), c in sorted(dupes.items()):
+    print(f"  ⚠️ {n} 在同一 scope（{sc}）被定義 {c} 次 → {', '.join(where[n])}")
+for n, sc in sorted(shadowed.items()):
+    proj = sorted(x for x in sc if x != "<root>")
+    print(f"  ℹ️ {n} 全域與專案層都有定義 → 專案層 {', '.join(proj)}（覆寫，非雙載）")
+for (cmd, args), nm in sorted(aliases.items(), key=lambda kv: sorted(kv[1])):
     shown = cmd if not args else cmd + " " + " ".join(args)
-    print(f"  ⚠️ {', '.join(sorted(names))} 指向同一支實作 → {shown}")
-if not dupes and not aliases:
+    print(f"  ⚠️ {', '.join(sorted(nm))} 指向同一支實作 → {shown}")
+if not dupes and not shadowed and not aliases:
     print("  無重複定義")
 PY
 
