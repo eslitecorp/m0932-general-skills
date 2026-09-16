@@ -33,6 +33,7 @@ def decl(**over):
         "incompressible": [
             {"name": "svc-a", "scales_with_concurrency": True, "per_unit_mb": 80,
              "observation": "關掉後有 3 次工具呼叫失敗紀錄",
+             "downclock_form": "整項移除",
              "shared_alternative_reason": "資料落地限制",
              "non_resident_alternative": "http transport"},
         ],
@@ -259,12 +260,12 @@ class TestWorkingSetDeclaration(unittest.TestCase):
 
     def _l2_case(self, ws):
         d = decl()
-        d["incompressible"] = [{"name": "browser", "scales_with_concurrency": False,
+        d["incompressible"] = [{"name": "browser", "downclock_form": "工作集縮減", "scales_with_concurrency": False,
                                 "working_set_mb": ws,
                                 "observation": "當下使用證據：45 個 process，取樣期間有 CPU 活動",
                                 "shared_alternative_reason": "延遲不可容忍",
                                 "non_resident_alternative": "無"}]
-        m = meas(attribution=[{"name": "browser", "layer": "L2", "footprint_mb": 9571}])
+        m = meas(attribution=[{"name": "browser", "downclock_form": "工作集縮減", "layer": "L2", "footprint_mb": 9571}])
         return cg.baseline(d, m)
 
     def test_declared_working_set_counts_only_the_declared_part(self):
@@ -280,10 +281,10 @@ class TestWorkingSetDeclaration(unittest.TestCase):
     def test_l2_without_working_set_is_still_excluded(self):
         """沒宣告工作集的 L2 照樣整項排除，並指名原因。"""
         d = decl()
-        d["incompressible"] = [{"name": "browser", "observation": "有在用",
+        d["incompressible"] = [{"name": "browser", "downclock_form": "工作集縮減", "observation": "有在用",
                                 "shared_alternative_reason": "延遲不可容忍",
                                 "non_resident_alternative": "無"}]
-        m = meas(attribution=[{"name": "browser", "layer": "L2", "footprint_mb": 9571}])
+        m = meas(attribution=[{"name": "browser", "downclock_form": "工作集縮減", "layer": "L2", "footprint_mb": 9571}])
         bl = cg.baseline(d, m)
         self.assertTrue(bl["intersection_empty"])
         self.assertIn("未宣告工作集", bl["excluded"][0]["reason"])
@@ -291,10 +292,10 @@ class TestWorkingSetDeclaration(unittest.TestCase):
     def test_working_set_still_needs_observation(self):
         """⛔ 工作集不能繞過 observation 這道門。"""
         d = decl()
-        d["incompressible"] = [{"name": "browser", "working_set_mb": 4000,
+        d["incompressible"] = [{"name": "browser", "downclock_form": "工作集縮減", "working_set_mb": 4000,
                                 "observation": "", "shared_alternative_reason": "延遲不可容忍",
                                 "non_resident_alternative": "無"}]
-        m = meas(attribution=[{"name": "browser", "layer": "L2", "footprint_mb": 9571}])
+        m = meas(attribution=[{"name": "browser", "downclock_form": "工作集縮減", "layer": "L2", "footprint_mb": 9571}])
         self.assertTrue(cg.baseline(d, m)["intersection_empty"])
 
 
@@ -496,7 +497,7 @@ class TestG2Unvalidatable(unittest.TestCase):
         d["incompressible"] = [{
             "name": "svc-a", "scales_with_concurrency": True, "per_unit_mb": 80,
             "observation": "有在用", "shared_alternative_reason": "資料落地限制",
-            "non_resident_alternative": "無",
+            "non_resident_alternative": "無", "downclock_form": "工作集縮減",
             "g2_unvalidatable": {"reason": "關掉它的代價是佇列遺失，劣化定義 A 量不到"}}]
         m = meas(downclock_experiment={"ran": ran, "degraded": degraded,
                                        "tasks": [f"t{i}" for i in range(10)]},
@@ -529,6 +530,51 @@ class TestG2Unvalidatable(unittest.TestCase):
         m = meas()
         g = cg.gate_g2(cg.baseline(decl(), m), cg.ratios(decl(), m, 400), m, decl())
         self.assertEqual(g["status"], cg.PASS)
+
+
+class TestG2DownclockForm(unittest.TestCase):
+    """
+    教訓 7（audit-standard.md §八之二）：「⛔ 不要預設 X」擋不住 X，
+    除非配一個會失敗的欄位。⚠️ 方向：更嚴 —— 宣告項未指定降載形態即不受理。
+    """
+
+    def _g2(self, d):
+        m = meas()
+        return cg.gate_g2(cg.baseline(d, m), cg.ratios(d, m, 400), m, d)
+
+    def test_missing_form_is_rejected(self):
+        """缺形態 → 不受理並指名，⛔ 不得靜默預設「整項移除」。"""
+        d = decl()
+        d["incompressible"] = [{k: v for k, v in d["incompressible"][0].items()
+                                if k != "downclock_form"}]
+        g = self._g2(d)
+        self.assertEqual(g["status"], cg.FAIL)
+        self.assertTrue(any("downclock_form" in p for p in g["problems"]))
+        self.assertTrue(any("svc-a" in p for p in g["problems"]))
+
+    def test_invalid_form_is_rejected(self):
+        """寫了但不在兩種形態裡，同樣不受理。"""
+        d = decl()
+        d["incompressible"] = [dict(d["incompressible"][0], downclock_form="關掉看看")]
+        self.assertEqual(self._g2(d)["status"], cg.FAIL)
+
+    def test_both_valid_forms_accepted(self):
+        """正向對照：兩種合法形態都不得被擋 —— 只驗「會擋」分不出檢查是否過嚴。"""
+        for form in ("整項移除", "工作集縮減"):
+            with self.subTest(form=form):
+                d = decl()
+                d["incompressible"] = [dict(d["incompressible"][0],
+                                            downclock_form=form)]
+                self.assertEqual(self._g2(d)["status"], cg.PASS)
+
+    def test_structural_item_needs_no_form(self):
+        """structural／mechanism 不跑降載實驗，⛔ 不得要求它們填形態。"""
+        d = decl()
+        base = {k: v for k, v in d["incompressible"][0].items()
+                if k != "downclock_form"}
+        d["incompressible"] = [dict(base, g2_validation={"type": "structural",
+                                                         "basis": "強制合規"})]
+        self.assertEqual(self._g2(d)["status"], cg.PASS)
 
 
 class TestG2ValidationTypology(unittest.TestCase):
@@ -585,7 +631,7 @@ class TestG2ValidationTypology(unittest.TestCase):
         d["incompressible"] = [
             dict(d["incompressible"][0],
                  g2_validation={"type": "structural", "basis": "作業系統"}),
-            {"name": "svc-b", "observation": "有在用",
+            {"name": "svc-b", "observation": "有在用", "downclock_form": "整項移除",
              "shared_alternative_reason": "資料落地限制",
              "non_resident_alternative": "無"}]
         m = self._no_downclock()

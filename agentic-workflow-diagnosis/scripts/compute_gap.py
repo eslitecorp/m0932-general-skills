@@ -369,6 +369,12 @@ def unvalidatable_items(decl: dict, bl: dict) -> list[dict]:
 # 這三個的共同點是「拿掉它，宣告的工作在定義上就不存在了」。
 STRUCTURAL_BASES = {"作業系統", "強制合規", "宣告的工作負載本身"}
 
+# 降載實驗的兩種形態。⛔ 留空不得預設成「整項移除」——
+# 對一個不可能歸零的項目，可驗的問題是「要多少才夠」不是「沒有它行不行」。
+# 這個檢查存在的理由見 audit-standard.md §八之二 教訓 7：
+# 「⛔ 不要預設 X」擋不住 X，除非配一個會失敗的欄位。
+DOWNCLOCK_FORMS = {"整項移除", "工作集縮減"}
+
 
 def validation_rows(decl: dict, bl: dict) -> tuple[list, list, list]:
     """
@@ -391,11 +397,25 @@ def validation_rows(decl: dict, bl: dict) -> tuple[list, list, list]:
     pending, rows, problems = [], [], []
     for c in bl["counted"]:
         name = c["name"]
-        v = (declared.get(name) or {}).get("g2_validation")
+        d = declared.get(name) or {}
+        v = d.get("g2_validation")
+        t = v.get("type") if isinstance(v, dict) else None
+        # 會走降載實驗的項目（沒填驗證 = 預設 downclock），形態必須表態。
+        # ⛔ 只查「有宣告」的項目 —— 項目根本沒被宣告是另一回事，
+        #    走下面既有的 pending 路徑（BLOCKED，待降載實驗），
+        #    不要把「宣告沒填完」與「實驗還沒跑」混成同一個結論。
+        if name in declared and t in (None, "downclock"):
+            form = d.get("downclock_form")
+            if form not in DOWNCLOCK_FORMS:
+                problems.append(
+                    f"「{name}」沒有指定 downclock_form"
+                    f"（{'／'.join(sorted(DOWNCLOCK_FORMS))}）。"
+                    "⛔ 不得預設「整項移除」—— 對不可能歸零的項目，"
+                    "可驗的問題是「要多少才夠」不是「沒有它行不行」")
+                continue
         if not isinstance(v, dict):
             pending.append(name)
             continue
-        t = v.get("type")
         if t == "mechanism":
             if v.get("mechanism") and v.get("levers_exhausted"):
                 rows.append({"name": name, "type": t,
